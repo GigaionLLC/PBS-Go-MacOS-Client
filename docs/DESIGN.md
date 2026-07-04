@@ -219,7 +219,8 @@ config+run. The design prototype (reviewable on any OS) lives in `gui/`.
 | M4 (done, code) | Restore in `pbmac`: reader protocol, index parse, chunk reassembly, **pxar decoder**, list + whole-archive + single-file. pxar encoder↔decoder proven consistent by a round-trip test | validate |
 | M3 (done, code) | Encrypted dedup: `CryptConfig` keyed digest ✓, scrypt/PBKDF2 keyfile ✓, manifest HMAC signature ✓ (gold-vector matched) | validate |
 | M5 (done) | Keychain credential storage ✓, `.pxarexclude`/`--exclude` ✓, `--json` on data commands ✓ | no |
-| M6 (v2) | `SnapshotSource` via tmutil ✓ (`backup --snapshot`); macOS metadata fidelity ✓ (xattrs, file flags; ACLs deferred — need cgo); GUI front-end: CLI JSON contract frozen (`CLI-JSON.md`), Tauri app pending | mixed |
+| M6 (v2) | `SnapshotSource` via tmutil ✓ (`backup --snapshot`); macOS metadata fidelity ✓ (xattrs, file flags; ACLs deferred — need cgo); GUI front-end: native SwiftUI app (`macos/`) that bundles pbmac ✓ | mixed |
+| v0.1.0 (shipped) | First testable release: ad-hoc-signed `.app` (pbmac embedded) + standalone CLI, published by `release.yml`. Live round-trips + official-client interop confirmed; parity/ship audit fixes applied. See [`STATUS.md`](STATUS.md). | validated |
 
 **Formats status:** all wire/on-disk formats are ported byte-for-byte from the
 Proxmox source and unit-tested offline. The two things unit tests *cannot* prove
