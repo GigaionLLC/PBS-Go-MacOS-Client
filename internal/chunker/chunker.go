@@ -1,43 +1,60 @@
-// Package chunker splits a byte stream into content-defined chunks using a
-// buzhash rolling hash, mirroring the *approach* PBS uses for dynamically sized
-// chunks. Boundaries fall where the rolling hash has enough low zero bits,
-// bounded by a min and max chunk size so pathological inputs stay in range.
-//
-// NOTE: matching PBS's exact chunk boundaries (its specific buzhash table and
-// mask) is required only for cross-client dedup alignment, not for a correct
-// standalone backup — the server accepts whatever chunks the client uploads via
-// the dynamic index. Aligning the constants with upstream is a tracked TODO.
+// Package chunker splits a byte stream into content-defined chunks using PBS's
+// exact buzhash rolling hash, so our chunk boundaries line up with the ones the
+// official proxmox-backup-client / server produce. This is a faithful port of
+// pbs-datastore/src/chunker.rs (cross-checked against the verified-identical Go
+// port in tizbac/proxmoxbackupclient_go: pbscommon/buzhash.go): a 32-bit buzhash
+// over a 64-byte window, break when (h & (avg*2-1)) >= (avg*2-1)-2, bounded by
+// min = avg/4 and max = avg*4. Matching these constants exactly is what makes
+// dedup (and incremental/previous-snapshot chunk reuse) actually work.
 package chunker
 
 import (
 	"crypto/sha256"
 	"io"
+	"math/bits"
 )
 
-const (
-	// windowSize is the rolling-hash window in bytes.
-	windowSize = 64
-	// Default size bounds for dynamically sized chunks.
-	defaultMinSize = 1 << 20  // 1 MiB
-	defaultAvgBits = 22       // ~4 MiB average (mask = 2^22-1)
-	defaultMaxSize = 16 << 20 // 16 MiB
-)
+// DefaultAvgSize is PBS's average chunk size for dynamic (pxar) archives.
+const DefaultAvgSize = 4 << 20 // 4 MiB
 
-// buzTable holds 256 pseudo-random 64-bit values. It is generated
-// deterministically at init so builds are reproducible without a huge literal.
-var buzTable [256]uint64
+// windowSize is the rolling-hash window in bytes.
+const windowSize = 64
 
-func init() {
-	var s uint64 = 0x2545F4914F6CDD1D // fixed seed (xorshift64)
-	for i := range buzTable {
-		s ^= s << 13
-		s ^= s >> 7
-		s ^= s << 17
-		buzTable[i] = s
-	}
+// buzTable is PBS's exact 256-entry buzhash table (pbs-datastore/src/chunker.rs).
+var buzTable = [256]uint32{
+	0x458be752, 0xc10748cc, 0xfbbcdbb8, 0x6ded5b68, 0xb10a82b5, 0x20d75648, 0xdfc5665f, 0xa8428801,
+	0x7ebf5191, 0x841135c7, 0x65cc53b3, 0x280a597c, 0x16f60255, 0xc78cbc3e, 0x294415f5, 0xb938d494,
+	0xec85c4e6, 0xb7d33edc, 0xe549b544, 0xfdeda5aa, 0x882bf287, 0x3116737c, 0x05569956, 0xe8cc1f68,
+	0x0806ac5e, 0x22a14443, 0x15297e10, 0x50d090e7, 0x4ba60f6f, 0xefd9f1a7, 0x5c5c885c, 0x82482f93,
+	0x9bfd7c64, 0x0b3e7276, 0xf2688e77, 0x8fad8abc, 0xb0509568, 0xf1ada29f, 0xa53efdfe, 0xcb2b1d00,
+	0xf2a9e986, 0x6463432b, 0x95094051, 0x5a223ad2, 0x9be8401b, 0x61e579cb, 0x1a556a14, 0x5840fdc2,
+	0x9261ddf6, 0xcde002bb, 0x52432bb0, 0xbf17373e, 0x7b7c222f, 0x2955ed16, 0x9f10ca59, 0xe840c4c9,
+	0xccabd806, 0x14543f34, 0x1462417a, 0x0d4a1f9c, 0x087ed925, 0xd7f8f24c, 0x7338c425, 0xcf86c8f5,
+	0xb19165cd, 0x9891c393, 0x325384ac, 0x0308459d, 0x86141d7e, 0xc922116a, 0xe2ffa6b6, 0x53f52aed,
+	0x2cd86197, 0xf5b9f498, 0xbf319c8f, 0xe0411fae, 0x977eb18c, 0xd8770976, 0x9833466a, 0xc674df7f,
+	0x8c297d45, 0x8ca48d26, 0xc49ed8e2, 0x7344f874, 0x556f79c7, 0x6b25eaed, 0xa03e2b42, 0xf68f66a4,
+	0x8e8b09a2, 0xf2e0e62a, 0x0d3a9806, 0x9729e493, 0x8c72b0fc, 0x160b94f6, 0x450e4d3d, 0x7a320e85,
+	0xbef8f0e1, 0x21d73653, 0x4e3d977a, 0x1e7b3929, 0x1cc6c719, 0xbe478d53, 0x8d752809, 0xe6d8c2c6,
+	0x275f0892, 0xc8acc273, 0x4cc21580, 0xecc4a617, 0xf5f7be70, 0xe795248a, 0x375a2fe9, 0x425570b6,
+	0x8898dcf8, 0xdc2d97c4, 0x0106114b, 0x364dc22f, 0x1e0cad1f, 0xbe63803c, 0x5f69fac2, 0x4d5afa6f,
+	0x1bc0dfb5, 0xfb273589, 0x0ea47f7b, 0x3c1c2b50, 0x21b2a932, 0x6b1223fd, 0x2fe706a8, 0xf9bd6ce2,
+	0xa268e64e, 0xe987f486, 0x3eacf563, 0x1ca2018c, 0x65e18228, 0x2207360a, 0x57cf1715, 0x34c37d2b,
+	0x1f8f3cde, 0x93b657cf, 0x31a019fd, 0xe69eb729, 0x8bca7b9b, 0x4c9d5bed, 0x277ebeaf, 0xe0d8f8ae,
+	0xd150821c, 0x31381871, 0xafc3f1b0, 0x927db328, 0xe95effac, 0x305a47bd, 0x426ba35b, 0x1233af3f,
+	0x686a5b83, 0x50e072e5, 0xd9d3bb2a, 0x8befc475, 0x487f0de6, 0xc88dff89, 0xbd664d5e, 0x971b5d18,
+	0x63b14847, 0xd7d3c1ce, 0x7f583cf3, 0x72cbcb09, 0xc0d0a81c, 0x7fa3429b, 0xe9158a1b, 0x225ea19a,
+	0xd8ca9ea3, 0xc763b282, 0xbb0c6341, 0x020b8293, 0xd4cd299d, 0x58cfa7f8, 0x91b4ee53, 0x37e4d140,
+	0x95ec764c, 0x30f76b06, 0x5ee68d24, 0x679c8661, 0xa41979c2, 0xf2b61284, 0x4fac1475, 0x0adb49f9,
+	0x19727a23, 0x15a7e374, 0xc43a18d5, 0x3fb1aa73, 0x342fc615, 0x924c0793, 0xbee2d7f0, 0x8a279de9,
+	0x4aa2d70c, 0xe24dd37f, 0xbe862c0b, 0x177c22c2, 0x5388e5ee, 0xcd8a7510, 0xf901b4fd, 0xdbc13dbc,
+	0x6c0bae5b, 0x64efe8c7, 0x48b02079, 0x80331a49, 0xca3d8ae6, 0xf3546190, 0xfed7108b, 0xc49b941b,
+	0x32baf4a9, 0xeb833a4a, 0x88a3f1a5, 0x3a91ce0a, 0x3cc27da1, 0x7112e684, 0x4a3096b1, 0x3794574c,
+	0xa3c8b6f3, 0x1d213941, 0x6e0a2e00, 0x233479f1, 0x0f4cd82f, 0x6093edd2, 0x5d7d209e, 0x464fe319,
+	0xd4dcac9e, 0x0db845cb, 0xfb5e4bc3, 0xe0256ce1, 0x09fb4ed1, 0x0914be1e, 0xa5bdb2c3, 0xc6eb57bb,
+	0x30320350, 0x3f397e91, 0xa67791bc, 0x86bc0e2c, 0xefa0a7e2, 0xe9ff7543, 0xe733612c, 0xd185897b,
+	0x329e5388, 0x91dd236b, 0x2ecb0d93, 0xf4d82a3d, 0x35b5c03f, 0xe4e606f0, 0x05b21843, 0x37b45964,
+	0x5eff22f4, 0x6027f4cc, 0x77178b3c, 0xae507131, 0x7bf7cabc, 0xf9c18d66, 0x593ade65, 0xd95ddf11,
 }
-
-func rotl(v uint64, r uint) uint64 { return (v << r) | (v >> (64 - r)) }
 
 // Chunk describes one content-defined chunk: its SHA-256 digest, byte offset in
 // the overall stream, and length.
@@ -47,115 +64,141 @@ type Chunk struct {
 	Length uint32
 }
 
-// Chunker produces chunks from a reader.
+// Chunker produces PBS-compatible content-defined chunks from a reader. The
+// rolling state (h/chunkSize/window/windowSize) persists across scan calls
+// within a chunk and resets at each boundary.
 type Chunker struct {
-	minSize int
-	maxSize int
-	mask    uint64
+	h                uint32
+	windowSize       uint64
+	chunkSize        uint64
+	chunkSizeMin     uint64
+	chunkSizeMax     uint64
+	breakTestMask    uint32
+	breakTestMinimum uint32
+	window           [windowSize]byte
 }
 
-// New returns a Chunker with default PBS-like size bounds.
-func New() *Chunker {
-	return &Chunker{
-		minSize: defaultMinSize,
-		maxSize: defaultMaxSize,
-		mask:    (1 << defaultAvgBits) - 1,
+// New returns a Chunker with PBS's default average chunk size (4 MiB).
+func New() *Chunker { return NewWithAvg(DefaultAvgSize) }
+
+// NewWithAvg returns a Chunker for a given average chunk size, deriving PBS's
+// min = avg/4, max = avg*4, and break-test constants.
+func NewWithAvg(avg uint64) *Chunker {
+	c := &Chunker{
+		chunkSizeMin:  avg >> 2,
+		chunkSizeMax:  avg << 2,
+		breakTestMask: uint32(avg*2 - 1),
 	}
+	c.breakTestMinimum = c.breakTestMask - 2
+	return c
+}
+
+// scan consumes data, updating the rolling state, and returns the position just
+// past the first chunk boundary within data (or 0 if none). On a boundary it
+// resets the state for the next chunk. Ported from PBS Chunker::scan.
+func (c *Chunker) scan(data []byte) uint64 {
+	dataLen := uint64(len(data))
+	pos := uint64(0)
+
+	// Window-fill phase: the first `windowSize` bytes of a chunk only prime the
+	// hash; no break can occur until the window is full.
+	if c.windowSize < windowSize {
+		need := uint64(windowSize) - c.windowSize
+		copyLen := need
+		if dataLen < need {
+			copyLen = dataLen
+		}
+		for i := uint64(0); i < copyLen; i++ {
+			b := data[pos]
+			c.window[c.windowSize] = b
+			c.h = bits.RotateLeft32(c.h, 1) ^ buzTable[b]
+			pos++
+			c.windowSize++
+		}
+		c.chunkSize += copyLen
+		if c.windowSize < windowSize {
+			return 0
+		}
+	}
+
+	// Rolling phase: slide the 64-byte window, testing for a boundary each step.
+	idx := c.chunkSize & 0x3f
+	for pos < dataLen {
+		enter := data[pos]
+		leave := c.window[idx]
+		c.h = bits.RotateLeft32(c.h, 1) ^ buzTable[leave] ^ buzTable[enter]
+		c.chunkSize++
+		pos++
+		c.window[idx] = enter
+		if c.shallBreak() {
+			c.h, c.chunkSize, c.windowSize = 0, 0, 0
+			return pos
+		}
+		idx = c.chunkSize & 0x3f
+	}
+	return 0
+}
+
+func (c *Chunker) shallBreak() bool {
+	if c.chunkSize >= c.chunkSizeMax {
+		return true
+	}
+	if c.chunkSize < c.chunkSizeMin {
+		return false
+	}
+	return (c.h & c.breakTestMask) >= c.breakTestMinimum
 }
 
 // Split reads r to EOF and invokes fn for each chunk in order, handing fn the
 // chunk metadata and the chunk's raw bytes. The byte slice passed to fn is only
 // valid for the duration of the call. Split returns the first error from r or fn.
 func (c *Chunker) Split(r io.Reader, fn func(Chunk, []byte) error) error {
-	br := &byteReader{r: r}
 	var (
-		offset uint64
-		buf    []byte
-		hash   uint64
-		window [windowSize]byte
-		wpos   int
-		filled bool
+		chunkBuf []byte
+		offset   uint64
 	)
+	readBuf := make([]byte, 256<<10)
 
 	flush := func() error {
-		if len(buf) == 0 {
+		if len(chunkBuf) == 0 {
 			return nil
 		}
 		ch := Chunk{
-			Digest: sha256.Sum256(buf),
+			Digest: sha256.Sum256(chunkBuf),
 			Offset: offset,
-			Length: uint32(len(buf)),
+			Length: uint32(len(chunkBuf)),
 		}
-		if err := fn(ch, buf); err != nil {
+		if err := fn(ch, chunkBuf); err != nil {
 			return err
 		}
-		offset += uint64(len(buf))
-		buf = buf[:0]
-		hash = 0
-		wpos = 0
-		filled = false
-		window = [windowSize]byte{}
+		offset += uint64(len(chunkBuf))
+		chunkBuf = chunkBuf[:0]
 		return nil
 	}
 
 	for {
-		b, err := br.ReadByte()
+		n, err := r.Read(readBuf)
+		if n > 0 {
+			data := readBuf[:n]
+			for len(data) > 0 {
+				pos := c.scan(data)
+				if pos == 0 {
+					chunkBuf = append(chunkBuf, data...)
+					break
+				}
+				chunkBuf = append(chunkBuf, data[:pos]...)
+				if err := flush(); err != nil {
+					return err
+				}
+				data = data[pos:]
+			}
+		}
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
 			return err
 		}
-		buf = append(buf, b)
-
-		// Update rolling hash: add incoming, remove outgoing (once window full).
-		out := window[wpos]
-		window[wpos] = b
-		wpos = (wpos + 1) % windowSize
-		if wpos == 0 {
-			filled = true
-		}
-		hash = rotl(hash, 1) ^ buzTable[b]
-		if filled {
-			hash ^= rotl(buzTable[out], windowSize%64)
-		}
-
-		if len(buf) >= c.maxSize {
-			if err := flush(); err != nil {
-				return err
-			}
-			continue
-		}
-		if len(buf) >= c.minSize && (hash&c.mask) == 0 {
-			if err := flush(); err != nil {
-				return err
-			}
-		}
 	}
 	return flush()
-}
-
-// byteReader adapts an io.Reader to cheap single-byte reads with buffering.
-type byteReader struct {
-	r   io.Reader
-	buf [64 * 1024]byte
-	n   int
-	pos int
-}
-
-func (b *byteReader) ReadByte() (byte, error) {
-	if b.pos >= b.n {
-		n, err := b.r.Read(b.buf[:])
-		if n == 0 {
-			if err == nil {
-				err = io.EOF
-			}
-			return 0, err
-		}
-		b.n = n
-		b.pos = 0
-	}
-	c := b.buf[b.pos]
-	b.pos++
-	return c, nil
 }
