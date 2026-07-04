@@ -1,10 +1,10 @@
 name: Live PBS validation
 
-# MANUAL ONLY — runs a real backup + restore round-trip against a live PBS.
+# MANUAL ONLY — runs real backup + restore round-trips against a live PBS.
 # GitHub-hosted runners are on the public internet, so the server must be
 # reachable over the WAN (port 8007). Configure three repo secrets first
 # (Settings -> Secrets and variables -> Actions):
-#   PBS_REPOSITORY   <wan-host>:8007:<datastore>   (e.g. 203.0.113.9:8007:cephfs-ssd-datastore)
+#   PBS_REPOSITORY   <wan-host>:8007:<datastore>
 #   PBS_API_TOKEN    USER@REALM!TOKENID:SECRET
 #   PBS_FINGERPRINT  server cert SHA-256 (AA:BB:.. or bare hex)
 # The token only needs DatastoreAdmin on the target datastore. Test snapshots
@@ -24,6 +24,7 @@ jobs:
       PBS_API_TOKEN: ${{ secrets.PBS_API_TOKEN }}
       PBS_FINGERPRINT: ${{ secrets.PBS_FINGERPRINT }}
       BID: ci-${{ github.run_id }}
+      IID: ci-inc-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -63,6 +64,14 @@ jobs:
           diff -r data out
           echo "plain round-trip byte-perfect"
 
+      - name: single-file restore
+        run: |
+          rm -rf single && mkdir single
+          ./pbmac restore --file /a.txt --target single "host/$BID/$BT_PLAIN" test.pxar
+          test "$(cat single/a.txt)" = "hello from CI run $BID"
+          test "$(find single -type f | wc -l | tr -d ' ')" = "1"
+          echo "single-file restore OK (only /a.txt, correct content)"
+
       - name: encrypted backup -> restore -> verify (+ no-key negative)
         run: |
           openssl rand -hex 32 > enc.key
@@ -77,16 +86,44 @@ jobs:
           fi
           echo "no-key restore correctly refused"
 
+      - name: incremental dedup (previous-snapshot reuse)
+        run: |
+          mkdir -p inc/docs
+          head -c 20000000 /dev/urandom > inc/big.bin
+          printf 'v1\n' > inc/docs/notes.txt
+          ./pbmac backup --id "$IID" test.pxar:inc >/dev/null
+          sleep 2 # PBS snapshots are second-granularity; ensure a newer timestamp
+          # Re-back-up unchanged: expect 0 uploads, all chunks reused.
+          ./pbmac backup --id "$IID" --json test.pxar:inc > inc2.json
+          cat inc2.json
+          python3 - <<'PY'
+          import json
+          r = json.load(open('inc2.json'))
+          assert r['unique_chunks'] == 0, f"expected 0 uploads on unchanged re-backup, got {r['unique_chunks']}"
+          assert r['reused_chunks'] > 0, "expected chunk reuse from the previous snapshot"
+          print(f"incremental reuse OK: uploaded 0, reused {r['reused_chunks']} chunks")
+          PY
+          # The reused snapshot must still restore byte-perfect.
+          BT=$(./pbmac list --json | python3 -c "import sys,json;print(max(s['backup-time'] for s in json.load(sys.stdin) if s['backup-id']=='$IID'))")
+          ./pbmac restore --target inc-out "host/$IID/$BT" test.pxar
+          diff -r inc inc-out
+          echo "incremental snapshot restores byte-perfect"
+
       - name: prune test snapshots
         if: always()
         run: |
           IFS=: read -r H P S <<< "$PBS_REPOSITORY"
-          if [ -z "$S" ]; then S="$P"; P=8007; fi   # host:store form -> default port
-          for spec in "$BID:$BT_PLAIN" "${BID}-enc:$BT_ENC"; do
-            id=${spec%:*}; bt=${spec##*:}
-            [ -z "$bt" ] && continue
-            echo "deleting host/$id/$bt from $S"
-            curl -k -sS -o /dev/null -w "  http=%{http_code}\n" -X DELETE \
-              -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" \
-              "https://$H:$P/api2/json/admin/datastore/$S/snapshots?backup-type=host&backup-id=$id&backup-time=$bt" || true
+          if [ -z "$S" ]; then S="$P"; P=8007; fi
+          base="https://$H:$P/api2/json/admin/datastore/$S/snapshots"
+          for id in "$BID" "${BID}-enc" "$IID"; do
+            [ -z "$id" ] && continue
+            curl -k -sS -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" \
+              "$base?backup-type=host&backup-id=$id" \
+              | python3 -c "import json,sys; [print(s['backup-time']) for s in json.load(sys.stdin).get('data',[])]" \
+              | while read -r t; do
+                  curl -k -sS -o /dev/null -w "  del $id/$t http=%{http_code}\n" -X DELETE \
+                    -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" \
+                    "$base?backup-type=host&backup-id=$id&backup-time=$t"
+                done
           done
+          echo "pruned test snapshots"
