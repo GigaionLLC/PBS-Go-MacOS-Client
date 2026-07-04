@@ -27,6 +27,7 @@ jobs:
       IID: ci-inc-${{ github.run_id }}
       XID: ci-xattr-${{ github.run_id }}
       FID: ci-flags-${{ github.run_id }}
+      AID: ci-acl-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -148,13 +149,29 @@ jobs:
           # clear immutable so workspace cleanup can remove the files
           chflags nouchg fl/locked.txt fl-out/locked.txt || true
 
+      - name: macOS ACL fidelity (com.apple.system.Security)
+        run: |
+          mkdir -p acl
+          printf 'acl test\n' > acl/f.txt
+          chmod +a "everyone deny delete" acl/f.txt      # set a real NFSv4 ACL
+          chmod +a "group:staff allow read,write" acl/f.txt
+          echo "--- source ACL ---"; ls -le acl/f.txt
+          ./pbmac backup --id "$AID" test.pxar:acl
+          BT=$(./pbmac list --json | python3 -c "import sys,json;print(max(s['backup-time'] for s in json.load(sys.stdin) if s['backup-id']=='$AID'))")
+          ./pbmac restore --target acl-out "host/$AID/$BT" test.pxar
+          echo "--- restored ACL ---"; ls -le acl-out/f.txt
+          src=$(ls -le acl/f.txt     | grep -E '^ +[0-9]+:')
+          rst=$(ls -le acl-out/f.txt | grep -E '^ +[0-9]+:')
+          test -n "$rst"; test "$src" = "$rst"
+          echo "ACL fidelity OK: NFSv4 ACEs restored identically"
+
       - name: prune test snapshots
         if: always()
         run: |
           IFS=: read -r H P S <<< "$PBS_REPOSITORY"
           if [ -z "$S" ]; then S="$P"; P=8007; fi
           base="https://$H:$P/api2/json/admin/datastore/$S/snapshots"
-          for id in "$BID" "${BID}-enc" "$IID" "$XID" "$FID"; do
+          for id in "$BID" "${BID}-enc" "$IID" "$XID" "$FID" "$AID"; do
             [ -z "$id" ] && continue
             curl -k -sS -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" "$base?backup-type=host&backup-id=$id" \
               | python3 -c "import json,sys; [print(s['backup-time']) for s in json.load(sys.stdin).get('data',[])]" \
