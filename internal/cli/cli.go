@@ -1,12 +1,28 @@
 // Package cli implements the pbmac command-line surface. Commands emit
-// human-readable output by default and JSON with --output json, so a GUI can
-// drive the same binary (see docs/DESIGN.md §6).
+// human-readable output by default and machine-readable JSON with --json, so a
+// GUI can drive the same binary (see docs/CLI-JSON.md and docs/DESIGN.md §6).
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 )
+
+// jsonMode, set by each command from its --json flag, makes fail() emit a
+// machine-readable error envelope instead of a human line.
+var jsonMode bool
+
+// hasJSONFlag reports whether --json/-json appears in args (used by commands,
+// like version, that don't run through a flag.FlagSet).
+func hasJSONFlag(args []string) bool {
+	for _, a := range args {
+		if a == "--json" || a == "-json" {
+			return true
+		}
+	}
+	return false
+}
 
 // Version is the client version, overridable at build time with -ldflags.
 var Version = "0.0.1-dev"
@@ -20,7 +36,12 @@ func Run(args []string) int {
 	cmd, rest := args[1], args[2:]
 	switch cmd {
 	case "version", "--version", "-v":
-		fmt.Printf("pbmac %s\n", Version)
+		if hasJSONFlag(rest) {
+			b, _ := json.Marshal(map[string]string{"name": "pbmac", "version": Version})
+			fmt.Println(string(b))
+		} else {
+			fmt.Printf("pbmac %s\n", Version)
+		}
 		return 0
 	case "help", "--help", "-h":
 		usage(os.Stdout)
@@ -33,6 +54,8 @@ func Run(args []string) int {
 		return cmdPing(rest)
 	case "list", "snapshots":
 		return cmdList(rest)
+	case "archives":
+		return cmdArchives(rest)
 	case "login":
 		return cmdLogin(rest)
 	default:
@@ -53,6 +76,7 @@ Commands:
   backup    Back up a directory to a PBS datastore
   restore   List or restore files from a snapshot
   list      List snapshots in the datastore
+  archives  List the archives/files in a snapshot (its manifest)
   login     Store repository + fingerprint in the local config
   version   Print the client version
   help      Show this help
@@ -66,8 +90,15 @@ Run "pbmac <command> --help" for command-specific flags.
 `)
 }
 
-// fail prints an error to stderr and returns a non-zero exit code.
+// fail prints an error to stderr and returns exit code 1. Under --json it emits
+// a stable {"error": "..."} envelope so a GUI can surface failures as data.
 func fail(format string, a ...any) int {
-	fmt.Fprintf(os.Stderr, "pbmac: "+format+"\n", a...)
+	msg := fmt.Sprintf(format, a...)
+	if jsonMode {
+		b, _ := json.Marshal(map[string]string{"error": msg})
+		fmt.Fprintln(os.Stderr, string(b))
+	} else {
+		fmt.Fprintln(os.Stderr, "pbmac: "+msg)
+	}
 	return 1
 }

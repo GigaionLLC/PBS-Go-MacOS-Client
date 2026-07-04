@@ -13,8 +13,10 @@ import (
 // Extractor writes decoded entries to a destination directory. If Only is set,
 // only that archive path (and its ancestor directories) is materialized.
 type Extractor struct {
-	Dest string
-	Only string // e.g. "/sub/file.txt"; empty = extract everything
+	Dest  string
+	Only  string // e.g. "/sub/file.txt"; empty = extract everything
+	Files int    // count of files written (for the restore summary)
+	Bytes uint64 // total bytes written
 }
 
 func perm(mode uint64) os.FileMode { return os.FileMode(mode & 0o777) }
@@ -66,13 +68,16 @@ func (e *Extractor) OnFile(path string, m pxar.Meta, content io.Reader) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(f, content); err != nil {
+	n, err := io.Copy(f, content)
+	if err != nil {
 		f.Close()
 		return err
 	}
 	if err := f.Close(); err != nil {
 		return err
 	}
+	e.Files++
+	e.Bytes += uint64(n)
 	_ = os.Chmod(d, perm(m.Mode))
 	applyXattrs(d, m.Xattrs)
 	setTimes(d, m)

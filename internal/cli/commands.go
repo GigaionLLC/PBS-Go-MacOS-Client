@@ -17,6 +17,7 @@ import (
 	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/crypto"
 	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/exclude"
 	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/keychain"
+	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/manifest"
 	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/protocol"
 	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/repo"
 	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/restore"
@@ -71,6 +72,23 @@ func loadKey(path string) (*crypto.Key, error) {
 	return &k, nil
 }
 
+// emitJSON pretty-prints v to stdout as JSON and returns exit 0.
+func emitJSON(v any) int {
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(v)
+	return 0
+}
+
+// backupJSON is the machine-readable backup result: the pipeline Result plus a
+// hex index csum, the dedup ratio, and (for live backups) the created snapshot id.
+type backupJSON struct {
+	backup.Result
+	DedupRatio float64 `json:"dedup_ratio"`
+	IndexCsum  string  `json:"index_csum"`
+	Snapshot   string  `json:"snapshot,omitempty"`
+}
+
 func cmdBackup(args []string) int {
 	fs := flag.NewFlagSet("backup", flag.ContinueOnError)
 	// --repo is accepted for forward-compatibility with the live upload path
@@ -88,6 +106,7 @@ func cmdBackup(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	jsonMode = *outputJSON
 	if fs.NArg() != 1 {
 		return fail("backup: expected exactly one NAME.pxar:/path argument")
 	}
@@ -146,10 +165,7 @@ func cmdBackup(args []string) int {
 			return fail("backup: %v", err)
 		}
 		if *outputJSON {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			_ = enc.Encode(res)
-			return 0
+			return emitJSON(backupJSON{Result: res, DedupRatio: res.DedupRatio(), IndexCsum: fmt.Sprintf("%x", res.IndexCsum)})
 		}
 		fmt.Printf("dry-run backup of %s -> archive %q\n%s\n", srcFS.Root(), archive, backup.FormatResult(res))
 		return 0
@@ -174,10 +190,12 @@ func cmdBackup(args []string) int {
 		return fail("backup: %v", err)
 	}
 	if *outputJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(res)
-		return 0
+		return emitJSON(backupJSON{
+			Result:     res,
+			DedupRatio: res.DedupRatio(),
+			IndexCsum:  fmt.Sprintf("%x", res.IndexCsum),
+			Snapshot:   fmt.Sprintf("%s/%s/%d", snap.Type, snap.ID, snap.Time),
+		})
 	}
 	fmt.Printf("backed up %s -> %s/%s archive %q\n%s\n", srcFS.Root(), snap.Type, snap.ID, archive, backup.FormatResult(res))
 	return 0
@@ -221,6 +239,7 @@ func cmdPing(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	jsonMode = *outputJSON
 	client, err := resolveClient(*repoFlag)
 	if err != nil {
 		return fail("%v", err)
@@ -230,10 +249,7 @@ func cmdPing(args []string) int {
 		return fail("ping: %v", err)
 	}
 	if *outputJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(v)
-		return 0
+		return emitJSON(v)
 	}
 	fmt.Printf("ok: PBS %s-%s (repoid %s)\n", v.Version, v.Release, v.RepoID)
 	return 0
@@ -246,6 +262,7 @@ func cmdList(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	jsonMode = *outputJSON
 	client, err := resolveClient(*repoFlag)
 	if err != nil {
 		return fail("%v", err)
@@ -255,10 +272,10 @@ func cmdList(args []string) int {
 		return fail("list: %v", err)
 	}
 	if *outputJSON {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(snaps)
-		return 0
+		if snaps == nil {
+			snaps = []protocol.Snapshot{} // encode as [] not null
+		}
+		return emitJSON(snaps)
 	}
 	for _, s := range snaps {
 		fmt.Printf("%s/%s\t%d\t%s\n", s.Type, s.ID, s.Time, s.Comment)
@@ -290,6 +307,7 @@ func cmdRestore(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	jsonMode = *outputJSON
 	if fs.NArg() != 2 {
 		return fail("restore: expected SNAPSHOT and ARCHIVE (e.g. host/mymac/1700000000 root.pxar)")
 	}
@@ -316,10 +334,10 @@ func cmdRestore(args []string) int {
 			return fail("restore: %v", err)
 		}
 		if *outputJSON {
-			enc := json.NewEncoder(os.Stdout)
-			enc.SetIndent("", "  ")
-			_ = enc.Encode(l.Entries)
-			return 0
+			if l.Entries == nil {
+				l.Entries = []restore.ListEntry{} // encode as [] not null
+			}
+			return emitJSON(l.Entries)
 		}
 		for _, e := range l.Entries {
 			fmt.Printf("%-7s %10d  %s\n", e.Type, e.Size, e.Path)
@@ -331,6 +349,15 @@ func cmdRestore(args []string) int {
 	if err := restore.Archive(context.Background(), client, snap, archive, key, ex); err != nil {
 		return fail("restore: %v", err)
 	}
+	if *outputJSON {
+		return emitJSON(map[string]any{
+			"snapshot":       fmt.Sprintf("%s/%s/%d", snap.Type, snap.ID, snap.Time),
+			"archive":        archive,
+			"target":         *target,
+			"files_restored": ex.Files,
+			"bytes_written":  ex.Bytes,
+		})
+	}
 	fmt.Printf("restored %s/%s archive %q to %s\n", snap.Type, snap.ID, archive, *target)
 	return 0
 }
@@ -340,9 +367,11 @@ func cmdLogin(args []string) int {
 	repoFlag := fs.String("repo", "", "repository spec to store")
 	fingerprint := fs.String("fingerprint", "", "server certificate SHA-256 to pin")
 	token := fs.String("token", "", "API token USER@REALM!TOKENID:SECRET to store in the Keychain")
+	outputJSON := fs.Bool("json", false, "emit JSON output")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	jsonMode = *outputJSON
 	if *repoFlag == "" {
 		return fail("login: --repo is required")
 	}
@@ -361,17 +390,70 @@ func cmdLogin(args []string) int {
 		return fail("login: %v", err)
 	}
 	p, _ := config.Path()
-	fmt.Printf("saved repository %q to %s\n", *repoFlag, p)
-
+	tokenStored := false
 	if *token != "" {
 		if err := keychain.Store(*repoFlag, *token); err != nil {
+			if *outputJSON {
+				return fail("login: keychain: %v", err)
+			}
+			fmt.Printf("saved repository %q to %s\n", *repoFlag, p)
 			fmt.Printf("note: could not store the token in the Keychain (%v);\n"+
 				"      set it via the %s environment variable instead.\n", err, config.EnvAPIToken)
-		} else {
-			fmt.Printf("stored API token in the macOS Keychain for %q\n", *repoFlag)
+			return 0
 		}
+		tokenStored = true
+	}
+	if *outputJSON {
+		return emitJSON(map[string]any{
+			"repository":   *repoFlag,
+			"config_path":  p,
+			"fingerprint":  cfg.Fingerprint,
+			"token_stored": tokenStored,
+		})
+	}
+	fmt.Printf("saved repository %q to %s\n", *repoFlag, p)
+	if tokenStored {
+		fmt.Printf("stored API token in the macOS Keychain for %q\n", *repoFlag)
 	} else {
 		fmt.Printf("note: provide --token to store the API token in the Keychain, or set %s.\n", config.EnvAPIToken)
+	}
+	return 0
+}
+
+// cmdArchives lists the archives/files recorded in a snapshot's manifest — the
+// data a GUI needs to populate an archive picker. `pbmac archives <type/id/time>`.
+func cmdArchives(args []string) int {
+	fs := flag.NewFlagSet("archives", flag.ContinueOnError)
+	repoFlag := fs.String("repo", "", "repository spec (overrides env/config)")
+	outputJSON := fs.Bool("json", false, "emit JSON output")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	jsonMode = *outputJSON
+	if fs.NArg() != 1 {
+		return fail("archives: expected a SNAPSHOT (e.g. host/mymac/1700000000)")
+	}
+	snap, err := parseSnapshot(fs.Arg(0))
+	if err != nil {
+		return fail("%v", err)
+	}
+	client, err := resolveClient(*repoFlag)
+	if err != nil {
+		return fail("%v", err)
+	}
+	m, err := restore.ManifestFor(context.Background(), client, snap)
+	if err != nil {
+		return fail("archives: %v", err)
+	}
+	if *outputJSON {
+		files := m.Files
+		if files == nil {
+			files = []manifest.FileInfo{}
+		}
+		return emitJSON(files)
+	}
+	for _, f := range m.Files {
+		fmt.Printf("%-24s %12d  %s\n", f.Filename, f.Size, f.CryptMode)
 	}
 	return 0
 }
