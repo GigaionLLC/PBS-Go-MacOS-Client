@@ -242,6 +242,48 @@
   .rprog{display:none;flex-direction:column;gap:9px}
   .rprog.on{display:flex}
 
+  /* ---- drag & drop ---- */
+  .path.drag{border-color:var(--accent);border-style:dashed;background:var(--accent-weak)}
+  .path.drag span{color:var(--accent)}
+  .dropping{outline:2px dashed var(--accent);outline-offset:-6px;border-radius:12px}
+
+  /* ---- setup / connection view ---- */
+  input.txt.wide{width:100%}
+  .field.stack{flex-direction:column;align-items:stretch;gap:6px}
+  .field.stack .flabel{width:auto}
+  .grouplabel{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text3);padding:6px 2px 4px}
+  .setup-note{font-size:12px;color:var(--text2);line-height:1.5}
+  .setup-note b{color:var(--text)}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86em;background:var(--content2);
+    border:.5px solid var(--sep);border-radius:5px;padding:1px 5px}
+  .warn{display:flex;gap:9px;align-items:flex-start;background:color-mix(in srgb,var(--amber) 12%,var(--content2));
+    border:.5px solid color-mix(in srgb,var(--amber) 40%,var(--sep));border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.45}
+  .warn svg{width:16px;height:16px;stroke:var(--amber);fill:none;stroke-width:1.8;flex:none;margin-top:1px}
+
+  /* ---- responsive (phone / narrow window) ---- */
+  @media (max-width:760px){
+    body{padding:0;place-items:stretch}
+    .win{width:100%;height:100vh;height:100dvh;border-radius:0;max-height:none}
+    .titlebar{height:46px}
+    .body{flex-direction:column}
+    .sidebar{width:100%;flex-direction:row;align-items:center;gap:10px;padding:8px 10px;overflow-x:auto;
+      border-right:0;border-bottom:.5px solid var(--sep);backdrop-filter:none}
+    .sidebar>div{flex:none}
+    .sidebar .grow,.sidebar .hint,.nav-label{display:none}
+    .conn{flex:none;padding:7px 9px}
+    .nav{flex-direction:row;gap:4px}
+    .nav a{height:34px;white-space:nowrap}
+    .snap-split{flex-direction:column}
+    .snap-list{width:100%;max-height:32vh;border-right:0;border-bottom:.5px solid var(--sep)}
+    .col{width:80vw;max-width:300px}
+    .actionbar{position:sticky;bottom:0}
+    .backup{padding:16px 14px}
+    .stats{grid-template-columns:repeat(2,1fr)}
+    .field .flabel{width:92px}
+    input.txt{width:100%}
+    .sheet{width:94%;padding:18px}
+  }
+
   @media (prefers-reduced-motion:reduce){*{transition:none!important;animation-duration:.001ms!important}}
 </style>
 
@@ -257,7 +299,7 @@
 
   <div class="body">
     <aside class="sidebar">
-      <div class="conn">
+      <div class="conn" id="connCard" style="cursor:pointer" title="Connection &amp; keys">
         <span class="dot"></span>
         <div>
           <div class="h">fslave32-lan</div>
@@ -274,6 +316,10 @@
           <a data-view="backup">
             <svg viewBox="0 0 24 24"><path d="M12 19V6m0 0l-5 5m5-5l5 5"/><path d="M5 21h14"/></svg>
             Back Up
+          </a>
+          <a data-view="setup">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="var(--sidebar-solid)"/><circle cx="15" cy="17" r="2" fill="var(--sidebar-solid)"/></svg>
+            Connection &amp; Keys
           </a>
         </nav>
       </div>
@@ -312,7 +358,7 @@
                 <div class="field">
                   <div class="flabel">Source</div>
                   <div class="fbody">
-                    <div class="path" id="srcPath"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg><span>Choose a folder…</span></div>
+                    <div class="path" id="srcPath"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg><span>Drop a folder here, or choose…</span></div>
                     <button class="tb-btn" id="chooseBtn">Choose…</button>
                   </div>
                 </div>
@@ -354,6 +400,62 @@
                 <div class="stat"><div class="k">Dedup</div><div class="v" id="sDe">0<small>%</small></div></div>
                 <div class="stat"><div class="k">Sent</div><div class="v" id="sBy">0 <small>MB</small></div></div>
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CONNECTION & KEYS -->
+      <section class="view" id="v-setup">
+        <div class="backup">
+          <div class="panel">
+            <h2>Connection &amp; Keys</h2>
+            <p class="lead">First-run setup. These map to <code>pbmac login</code> and your encryption key — the token and passphrase live in the macOS Keychain, never in a plaintext file.</p>
+
+            <div class="grouplabel">Server access</div>
+            <div class="card">
+              <div class="field stack">
+                <div class="flabel">Repository</div>
+                <input class="txt wide" value="fslave32-lan.gigaion.com:8007:cephfs-ssd-datastore" spellcheck="false">
+                <div class="fdesc"><code>host:port:datastore</code> — saved to <code>~/Library/Application&nbsp;Support/pbmac/config.json</code></div>
+              </div>
+              <div class="field stack">
+                <div class="flabel">API token</div>
+                <input class="txt wide" type="password" value="gomactest@pbs!gui-abcdef012345" spellcheck="false">
+                <div class="fdesc">Stored in the login Keychain. Create one in PBS → Access Control → API Tokens.</div>
+              </div>
+              <div class="field stack">
+                <div class="flabel">Fingerprint</div>
+                <input class="txt wide" value="CB:28:5F:… (trusted on first connect)" spellcheck="false">
+                <div class="fdesc">SHA-256 of the server certificate, pinned for TLS. Auto-filled the first time you connect.</div>
+              </div>
+            </div>
+
+            <div class="grouplabel">Encryption key</div>
+            <div class="card">
+              <div class="field">
+                <div class="flabel">Key file</div>
+                <div class="fbody">
+                  <div class="path" id="keyPath"><svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg><span class="set">~/…/pbmac/encryption-key.json</span></div>
+                  <button class="tb-btn" id="keyChoose">Choose…</button>
+                  <button class="tb-btn" id="keyGen">Generate…</button>
+                </div>
+              </div>
+              <div class="field stack">
+                <div class="flabel">Passphrase</div>
+                <input class="txt wide" type="password" value="hunter2hunter2" placeholder="unlocks a scrypt/PBKDF2-protected key">
+                <div class="fdesc">Held in the Keychain, passed to pbmac as <code>PBS_ENCRYPTION_PASSWORD</code>. Leave blank for an unprotected key.</div>
+              </div>
+            </div>
+
+            <div class="warn">
+              <svg viewBox="0 0 24 24"><path d="M12 9v4m0 4h.01M10.3 3.9L2 18a2 2 0 001.7 3h16.6a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+              <div>Encryption happens client-side (AES-256-GCM) before anything leaves your Mac. <b>Keep a copy of this key somewhere safe — without it, encrypted snapshots can never be restored.</b></div>
+            </div>
+
+            <div class="runbar" style="margin-top:4px">
+              <button class="btn primary" id="saveConn">Save &amp; Connect</button>
+              <span class="fdesc">Runs <code>pbmac login</code> then a <code>ping</code></span>
             </div>
           </div>
         </div>
@@ -514,14 +616,19 @@
   }
 
   // ---------- nav / views ----------
-  $('#nav').addEventListener('click',function(e){
-    var a=e.target.closest('a'); if(!a)return;
-    [].forEach.call(this.querySelectorAll('a'),function(x){x.classList.remove('on')}); a.classList.add('on');
-    var v=a.dataset.view;
+  var TITLES={snapshots:'Snapshots',backup:'Back Up',setup:'Connection'};
+  function showView(v){
+    [].forEach.call($('#nav').querySelectorAll('a'),function(x){ x.classList.toggle('on',x.dataset.view===v); });
     $('#v-snapshots').classList.toggle('on',v==='snapshots');
     $('#v-backup').classList.toggle('on',v==='backup');
-    $('#tbTitle').innerHTML = v==='snapshots'? 'Snapshots <span class="sub">· cephfs-ssd-datastore</span>' : 'Back Up <span class="sub">· cephfs-ssd-datastore</span>';
-  });
+    $('#v-setup').classList.toggle('on',v==='setup');
+    $('#tbTitle').innerHTML = (TITLES[v]||'')+' <span class="sub">· cephfs-ssd-datastore</span>';
+  }
+  $('#nav').addEventListener('click',function(e){ var a=e.target.closest('a'); if(a) showView(a.dataset.view); });
+  $('#connCard').onclick=function(){ showView('setup'); };
+  $('#saveConn').onclick=function(){ var b=this; b.textContent='Connecting…'; b.disabled=true;
+    setTimeout(function(){ b.textContent='Save & Connect'; b.disabled=false; showView('snapshots'); },900); };
+  $('#keyChoose').onclick=$('#keyGen').onclick=function(){ var s=$('#keyPath span'); s.className='set'; s.textContent='~/…/pbmac/encryption-key.json'; };
 
   // ---------- back up flow ----------
   var opts={encrypt:true,compress:false}, srcSet=false;
@@ -531,7 +638,17 @@
     f.push('mymac.pxar:~/Documents'); return 'pbmac '+f.join(' '); }
   function syncCmd(){ $('#cmdPreview').textContent=cmd(); }
   [].forEach.call(document.querySelectorAll('.toggle'),function(t){ t.onclick=function(){ t.classList.toggle('on'); opts[t.dataset.opt]=t.classList.contains('on'); syncCmd(); }; });
-  $('#chooseBtn').onclick=function(){ srcSet=true; var p=$('#srcPath'); p.querySelector('span').className='set'; p.querySelector('span').textContent='~/Documents'; $('#runBackup').disabled=false; syncCmd(); };
+  function setSrc(name){ srcSet=true; var s=$('#srcPath span'); s.className='set'; s.textContent=name; $('#runBackup').disabled=false; syncCmd(); }
+  $('#chooseBtn').onclick=function(){ setSrc('~/Documents'); };
+
+  // drag & drop a folder onto the source (and restore destination)
+  function dropTarget(el,onFile){
+    ['dragenter','dragover'].forEach(function(ev){ el.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); el.classList.add('drag'); }); });
+    ['dragleave','dragend','drop'].forEach(function(ev){ el.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); el.classList.remove('drag'); }); });
+    el.addEventListener('drop',function(e){ var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; onFile(f?('~/'+f.name):'~/Documents'); });
+  }
+  dropTarget($('#srcPath'),setSrc);
+  dropTarget($('#destPath'),function(name){ var s=$('#destPath span'); s.className='set'; s.textContent=name; });
   $('#bid').oninput=syncCmd; $('#excl').oninput=syncCmd;
   $('#runBackup').onclick=function(){
     $('#backupForm').style.display='none'; $('#backupProgress').classList.add('on');
