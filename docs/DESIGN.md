@@ -166,16 +166,18 @@ lets the GUI be any tech (SwiftUI, Tauri, Electron).
   `listxattr`/`getxattr` and restored via `setxattr` (`internal/source` +
   `internal/restore`, build-tagged), carried as `PXAR_XATTR` items. Because
   macOS keeps Finder info, tags, quarantine, and even resource forks *as*
-  `com.apple.*` xattrs, those ride along. Remaining metadata items, in order of
-  relevance:
-  - **POSIX ACLs** — a legitimate gap: pxar has dedicated `PXAR_ACL_*` item types
-    that the official Linux client emits; we don't yet.
-  - **BSD file flags** (`chflags`: immutable/append/nodump/hidden) — **not** a
-    parity gap. The official client is Linux-only and never captures them (Linux
-    has no `chflags`). The pxar ENTRY has a `flags` field the Linux client fills
-    from Linux `chattr` attributes; only immutable/append/nodump overlap with
-    macOS `chflags`, and even those are ignored on a Linux restore — so carrying
-    them would be a low-value macOS-only nicety, not fidelity parity. Deferred.
+  `com.apple.*` xattrs, those ride along.
+- **BSD file flags (`chflags`) — implemented** for the bits with a pxar
+  equivalent, carried in the ENTRY `flags` field: `UF/SF_IMMUTABLE` → immutable
+  (Finder "Locked"), `UF/SF_APPEND` → append, `UF_HIDDEN` → hidden, `UF_NODUMP` →
+  nodump (`internal/source/flags_darwin.go` + `internal/restore/flags_darwin.go`,
+  mapped against `pbs-client/src/pxar/flags.rs`). macOS↔macOS round-trips; the
+  official Linux client honors immutable/append on restore. System-managed macOS
+  flags (SIP/dataless/firmlink/compressed) have no equivalent and are dropped;
+  symlinks are skipped (no `lchflags` on darwin).
+- **Remaining metadata gap: POSIX ACLs** — pxar has dedicated `PXAR_ACL_*` item
+  types the official Linux client emits; we don't yet. That's the one legitimate
+  fidelity item still open.
 
 ## 8. Roadmap
 

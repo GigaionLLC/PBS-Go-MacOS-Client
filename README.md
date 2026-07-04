@@ -14,7 +14,8 @@ with client-side encryption, over the reverse-engineered PBS wire protocol.
 > everything; edits send only the delta). The content-defined chunker is a
 > byte-exact port of PBS's buzhash, and the manifest HMAC signature matches PBS's
 > gold vector (server reports `sign-only`). macOS extended attributes
-> (`com.apple.*`: quarantine, Finder info, tags, resource forks) are preserved,
+> (`com.apple.*`: quarantine, Finder info, tags, resource forks) and BSD file
+> flags (`chflags`: Locked/immutable, hidden, append, nodump) are preserved,
 > and the official `proxmox-backup-client` restores pbmac archives byte-perfect —
 > both validated on CI. See [`docs/DESIGN.md`](docs/DESIGN.md).
 
