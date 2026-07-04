@@ -84,6 +84,11 @@ jobs:
           sudo xcode-select -s /Applications/Xcode.app
           xcodebuild -version
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: install xcodegen
         run: brew install xcodegen
 
@@ -91,12 +96,21 @@ jobs:
         working-directory: macos
         run: xcodegen generate
 
-      - name: build app (no signing)
+      - name: build app (embeds pbmac)
         working-directory: macos
         run: |
           xcodebuild \
             -project PBMac.xcodeproj \
             -target PBMac \
             -configuration Debug \
+            -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: verify pbmac is embedded and runs
+        working-directory: macos
+        run: |
+          APP=$(find build/Build/Products -maxdepth 2 -name '*.app' | head -1)
+          echo "app bundle: $APP"
+          test -x "$APP/Contents/Resources/pbmac" || { echo "pbmac not embedded"; exit 1; }
+          "$APP/Contents/Resources/pbmac" version

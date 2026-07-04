@@ -26,7 +26,32 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.gigaion.pbmac
         INFOPLIST_FILE: PBMac/Info.plist
         GENERATE_INFOPLIST_FILE: NO
-        CODE_SIGN_STYLE: Automatic
+        # Apple Silicon only (matches the pbmac darwin/arm64 target). No hardened
+        # runtime / sandbox: the app execs the bundled pbmac and talks to the
+        # network without needing special entitlements or notarization.
+        ARCHS: arm64
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_ENTITLEMENTS: ""
         ENABLE_HARDENED_RUNTIME: NO
+        ENABLE_APP_SANDBOX: NO
         COMBINE_HIDPI_IMAGES: YES
         ENABLE_PREVIEWS: YES
+    # Build the pbmac CLI and embed it in the app bundle so it ships as a single
+    # download. Runs before code signing, so the app's signature covers it.
+    postCompileScripts:
+      - name: Embed pbmac CLI
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          export PATH="$PATH:/usr/local/go/bin:/opt/homebrew/bin:$HOME/go/bin"
+          if ! command -v go >/dev/null 2>&1; then
+            echo "error: Go toolchain not found on PATH; install Go to embed the pbmac CLI." >&2
+            exit 1
+          fi
+          DEST="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+          mkdir -p "$DEST"
+          ( cd "$SRCROOT/.." && GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
+              go build -trimpath -ldflags "-s -w" -o "$DEST/pbmac" ./cmd/pbmac )
+          chmod +x "$DEST/pbmac"
+          echo "embedded pbmac -> $DEST/pbmac"

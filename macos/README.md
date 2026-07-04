@@ -10,30 +10,38 @@ progress, or drag a file out to Finder), and **back up** (drag a folder in → l
 dedup result). The [`../gui/`](../gui/) HTML prototype is the interactive design
 spec; this is the real implementation.
 
-## Build & run (needs a Mac)
+## The pbmac CLI is bundled — one download
 
-The Xcode project is generated from [`project.yml`](project.yml) with
-[XcodeGen](https://github.com/yonik/XcodeGen), so only this spec + the Swift
-sources are tracked.
+The app **ships `pbmac` inside the bundle** (`Contents/Resources/pbmac`), so there
+is nothing to install separately. A build phase (see `project.yml` →
+*Embed pbmac CLI*) compiles `./cmd/pbmac` for `darwin/arm64` straight into the
+`.app` on every build. At runtime the app resolves the binary in this order:
+bundled copy → `$PBMAC_BIN` → `/opt/homebrew/bin` → `/usr/local/bin`.
+
+## Build a distributable app (needs a Mac)
+
+Ad-hoc signed, **no Apple Developer account or notarization required** — it runs
+on Apple Silicon; the user just right-clicks → Open the first time.
 
 ```sh
-brew install xcodegen
+brew install xcodegen          # one-time
+bash macos/build-app.sh        # -> macos/dist/Proxmox Backup.app
+```
+
+First launch of an un-notarized app: right-click the app → **Open** (or
+`xattr -dr com.apple.quarantine "Proxmox Backup.app"`).
+
+## Develop in Xcode
+
+```sh
 cd macos
 xcodegen               # writes PBMac.xcodeproj (gitignored)
-open PBMac.xcodeproj   # ⌘R to run
+open PBMac.xcodeproj    # ⌘R to run — pbmac is embedded automatically
 ```
 
-**Point it at `pbmac`.** The app looks for the binary in this order: a copy
-bundled in the app’s Resources (named `pbmac`) → `$PBMAC_BIN` → `/opt/homebrew/bin`
-→ `/usr/local/bin`. For development, build the CLI and export the path:
-
-```sh
-go build -o /usr/local/bin/pbmac ./cmd/pbmac      # or: export PBMAC_BIN=/path/to/pbmac
-```
-
-For distribution, drop a `darwin/arm64` `pbmac` into the app target’s *Copy Bundle
-Resources* and it’s found automatically. Xcode **Previews** work without any of
-this — they run on the fixtures in `SampleData.swift`.
+Needs Go on `PATH` (the embed phase calls `go build`). **Previews** work without
+any of this — they run on the fixtures in `SampleData.swift`. To iterate against a
+hand-built CLI instead of the embedded one, `export PBMAC_BIN=/path/to/pbmac`.
 
 ## Layout
 

@@ -13,6 +13,7 @@
 /macos/*.xcworkspace/
 /macos/DerivedData/
 /macos/build/
+/macos/dist/
 .DS_Store
 xcuserdata/
 
