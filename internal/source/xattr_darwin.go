@@ -2,28 +2,20 @@
 
 package source
 
-import (
-	"fmt"
-	"os"
-
-	"golang.org/x/sys/unix"
-)
-
-// aclXattrName is the pseudo-xattr macOS exposes the native (NFSv4/kauth) ACL
-// under. getxattr/setxattr marshal the kauth_filesec blob to/from it (this is how
-// copyfile(COPYFILE_ACL) moves ACLs). It is FILTERED OUT of listxattr, so it must
-// be fetched by explicit name — carrying it verbatim through the xattr channel is
-// how we get lossless macOS↔macOS ACL fidelity without cgo or a lossy POSIX map.
-const aclXattrName = "com.apple.system.Security"
+import "golang.org/x/sys/unix"
 
 // readXattrs returns a file's extended attributes (name -> raw value) via the
-// libSystem listxattr/getxattr wrappers in x/sys/unix: the listxattr-enumerated
-// names (com.apple.* quarantine/FinderInfo/ResourceFork/tags, verbatim) plus the
-// native ACL blob fetched explicitly. Best-effort per attribute. The caller skips
-// symlinks, so following-vs-NOFOLLOW is moot here.
+// libSystem listxattr/getxattr wrappers in x/sys/unix. macOS com.apple.* names
+// (quarantine, FinderInfo, ResourceFork, tags) are returned verbatim. Best-effort
+// per attribute. The caller skips symlinks, so following-vs-NOFOLLOW is moot here.
+//
+// NOTE: NFSv4 ACLs are NOT captured — macOS exposes them only via the
+// com.apple.system.Security pseudo-xattr, which getxattr rejects with EPERM, and
+// the real ACL API needs cgo (see docs/DESIGN.md §7). Everything users typically
+// rely on (resource forks, Finder info, tags, quarantine) is an ordinary xattr and
+// is captured here.
 func readXattrs(path string) (map[string][]byte, error) {
 	xs := map[string][]byte{}
-
 	sz, err := unix.Listxattr(path, nil)
 	if err != nil {
 		return nil, err
@@ -42,17 +34,6 @@ func readXattrs(path string) (map[string][]byte, error) {
 			}
 		}
 	}
-
-	// The ACL pseudo-xattr, present only on files/dirs that carry an ACL.
-	if v, err := getXattrValue(path, aclXattrName); err == nil {
-		xs[aclXattrName] = v
-		if os.Getenv("PBMAC_DEBUG_XATTR") != "" {
-			fmt.Fprintf(os.Stderr, "pbmac-debug: captured %s len=%d on %s\n", aclXattrName, len(v), path)
-		}
-	} else if os.Getenv("PBMAC_DEBUG_XATTR") != "" {
-		fmt.Fprintf(os.Stderr, "pbmac-debug: no %s on %s (%v)\n", aclXattrName, path, err)
-	}
-
 	if len(xs) == 0 {
 		return nil, nil
 	}

@@ -190,15 +190,17 @@ restore picker (`restore --list`), restore run, backup config+run.
   official Linux client honors immutable/append on restore. System-managed macOS
   flags (SIP/dataless/firmlink/compressed) have no equivalent and are dropped;
   symlinks are skipped (no `lchflags` on darwin).
-- **ACLs — implemented (macOS-native).** macOS uses NFSv4-style ACLs, which
+- **ACLs — deferred (no cgo-free path).** macOS uses NFSv4-style ACLs, which
   cannot be honestly represented in pxar's POSIX.1e `PXAR_ACL_*` items (no deny
-  ACEs, no GUIDs, rwx-only), and reading a POSIX ACL would need cgo. Instead we
-  carry the native ACL verbatim: macOS exposes it as the `com.apple.system.Security`
-  pseudo-xattr (how `copyfile(COPYFILE_ACL)` works), so it rides the existing
-  xattr channel cgo-free. It's filtered out of `listxattr`, so we fetch it by
-  explicit name (`internal/source/xattr_darwin.go`); restore is the normal
-  `setxattr`. Lossless macOS↔macOS; opaque to and ignored by the Linux client.
-  (`PXAR_ACL_*` interop is deferred as lossy/unsound — see the rejected mapping.)
+  ACEs, no GUIDs, rwx-only). The tempting cgo-free route — the
+  `com.apple.system.Security` pseudo-xattr — does **not** work: `getxattr` of it
+  returns `EPERM` (verified on CI), so the kernel doesn't expose the ACL to
+  userspace that way. The real API (`acl_get_file`/`acl_set_file`, or `getattrlist
+  ATTR_CMN_EXTENDED_SECURITY`) needs cgo or a hand-rolled libSystem trampoline,
+  which conflicts with the pure-Go cross-compile invariant (§2). So ACL fidelity
+  is deferred — a future opt-in cgo build could add it. Note the metadata users
+  actually rely on (resource forks, Finder info, tags, quarantine) travels as
+  ordinary `com.apple.*` xattrs and *is* preserved.
 
 ## 8. Roadmap
 
@@ -211,7 +213,7 @@ restore picker (`restore --list`), restore run, backup config+run.
 | M4 (done, code) | Restore in `pbmac`: reader protocol, index parse, chunk reassembly, **pxar decoder**, list + whole-archive + single-file. pxar encoder↔decoder proven consistent by a round-trip test | validate |
 | M3 (done, code) | Encrypted dedup: `CryptConfig` keyed digest ✓, scrypt/PBKDF2 keyfile ✓, manifest HMAC signature ✓ (gold-vector matched) | validate |
 | M5 (done) | Keychain credential storage ✓, `.pxarexclude`/`--exclude` ✓, `--json` on data commands ✓ | no |
-| M6 (v2) | `SnapshotSource` via tmutil ✓ (`backup --snapshot`); macOS metadata fidelity ✓ (xattrs, ACLs, file flags); GUI front-end: CLI JSON contract frozen (`CLI-JSON.md`), Tauri app pending | mixed |
+| M6 (v2) | `SnapshotSource` via tmutil ✓ (`backup --snapshot`); macOS metadata fidelity ✓ (xattrs, file flags; ACLs deferred — need cgo); GUI front-end: CLI JSON contract frozen (`CLI-JSON.md`), Tauri app pending | mixed |
 
 **Formats status:** all wire/on-disk formats are ported byte-for-byte from the
 Proxmox source and unit-tested offline. The two things unit tests *cannot* prove
