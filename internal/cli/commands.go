@@ -81,6 +81,7 @@ func cmdBackup(args []string) int {
 	keyfile := fs.String("keyfile", "", "path to a 32-byte (or 64-hex) encryption key")
 	backupID := fs.String("id", "", "backup id (defaults to the hostname)")
 	compress := fs.Bool("compress", false, "zstd-compress chunks")
+	snapshot := fs.Bool("snapshot", false, "back up a crash-consistent APFS local snapshot (macOS; needs sudo + Full Disk Access)")
 	var excludes stringSlice
 	fs.Var(&excludes, "exclude", "exclude glob pattern (repeatable); .pxarexclude in the root is also read")
 	outputJSON := fs.Bool("json", false, "emit JSON output")
@@ -98,6 +99,15 @@ func cmdBackup(args []string) int {
 	srcFS, err := source.NewLiveDirectoryFS(path)
 	if err != nil {
 		return fail("source: %v", err)
+	}
+	// Optional: back up a crash-consistent APFS snapshot instead of the live tree.
+	if *snapshot {
+		ssFS, closer, err := source.OpenSnapshot(path)
+		if err != nil {
+			return fail("snapshot: %v", err)
+		}
+		defer closer.Close() // unmount + delete, even if the backup later fails
+		srcFS = ssFS
 	}
 
 	// Resolve an optional encryption key.
@@ -124,7 +134,7 @@ func cmdBackup(args []string) int {
 	// Build the exclude matcher from --exclude flags plus a .pxarexclude file
 	// in the backup root, if present.
 	excludeLines := []string(excludes)
-	if b, err := os.ReadFile(filepath.Join(path, ".pxarexclude")); err == nil {
+	if b, err := os.ReadFile(filepath.Join(srcFS.Root(), ".pxarexclude")); err == nil {
 		excludeLines = append(excludeLines, strings.Split(string(b), "\n")...)
 	}
 
