@@ -1,66 +1,92 @@
 name: Release
 
-# Cut a macOS arm64 test build. Push a tag (e.g. `git tag v0.1.0 && git push --tags`)
-# to create a GitHub Release with the binary attached, or run manually from the
-# Actions tab to produce a downloadable artifact without publishing a release.
+# Tag a commit `vX.Y.Z` (or run manually with a tag) to build the macOS app and
+# publish a GitHub Release with:
+#   - ProxmoxBackup-<ver>-macos-arm64.zip  (the .app; pbmac bundled inside;
+#                                            ad-hoc signed, un-notarized)
+#   - pbmac-<ver>-darwin-arm64             (the standalone CLI)
+#   - SHA256SUMS.txt
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
-      version:
-        description: "Version string to stamp into the binary (e.g. v0.1.0-test)"
-        required: false
-        default: "dev"
+      tag:
+        description: "Tag to release, e.g. v0.1.0 (created at the current commit if new)"
+        required: true
 
 permissions:
-  contents: write # needed to create the GitHub Release
+  contents: write # create releases + tags
 
 jobs:
   release:
-    name: build darwin/arm64
-    runs-on: macos-14
+    name: build + publish macOS app
+    runs-on: macos-15 # Xcode 16 — reads XcodeGen's project format
     steps:
       - uses: actions/checkout@v4
+
+      - name: select latest Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
+      - name: install xcodegen
+        run: brew install xcodegen
+
       - name: resolve version
-        id: v
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "version=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
-          fi
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "TAG=$TAG"     >> "$GITHUB_ENV"
+          echo "VER=${TAG#v}" >> "$GITHUB_ENV"
 
-      - name: build
-        env:
-          VERSION: ${{ steps.v.outputs.version }}
+      - name: build standalone pbmac (darwin/arm64)
         run: |
-          GOOS=darwin GOARCH=arm64 go build -trimpath \
-            -ldflags "-s -w -X github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/cli.Version=${VERSION}" \
-            -o pbmac-darwin-arm64 ./cmd/pbmac
-          shasum -a 256 pbmac-darwin-arm64 | tee pbmac-darwin-arm64.sha256
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/cli.Version=$VER" \
+            -o pbmac ./cmd/pbmac
+          ./pbmac version
 
-      - name: upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: pbmac-darwin-arm64
-          path: |
-            pbmac-darwin-arm64
-            pbmac-darwin-arm64.sha256
-          if-no-files-found: error
+      - name: build + ad-hoc-sign the app (pbmac embedded)
+        working-directory: macos
+        run: PBMAC_VERSION="$VER" bash build-app.sh
 
-      - name: publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: verify the app's embedded pbmac reports the release version
+        run: |
+          APP="macos/dist/Proxmox Backup.app"
+          test -x "$APP/Contents/Resources/pbmac"
+          "$APP/Contents/Resources/pbmac" version | grep -q "$VER"
+
+      - name: package artifacts
+        run: |
+          mkdir -p dist
+          # ditto preserves the bundle (symlinks, xattrs, ad-hoc signature)
+          ditto -c -k --sequesterRsrc --keepParent "macos/dist/Proxmox Backup.app" "dist/ProxmoxBackup-$VER-macos-arm64.zip"
+          cp pbmac "dist/pbmac-$VER-darwin-arm64"
+          ( cd dist && shasum -a 256 * > SHA256SUMS.txt )
+          ls -la dist
+
+      - name: create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            pbmac-darwin-arm64 pbmac-darwin-arm64.sha256 \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+          NOTES=$(cat <<EOF
+          Native macOS (Apple Silicon) client for Proxmox Backup Server. The \`pbmac\` CLI is **bundled inside the app** — one download.
+
+          ### Install
+          Download \`ProxmoxBackup-$VER-macos-arm64.zip\`, unzip, and move **Proxmox Backup.app** to /Applications.
+          It is ad-hoc signed (not notarized), so on first launch **right-click the app → Open** (or run \`xattr -dr com.apple.quarantine "Proxmox Backup.app"\`).
+
+          ### Command line
+          The app menu has **Install Command-Line Tool…**, which symlinks the bundled \`pbmac\` onto your PATH. Or use the standalone \`pbmac-$VER-darwin-arm64\`.
+
+          Requires Apple Silicon, macOS 14+. Grant Full Disk Access to back up broad user data (Desktop/Documents/Photos).
+          EOF
+          )
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "$TAG" \
+            --notes "$NOTES" \
+            dist/*

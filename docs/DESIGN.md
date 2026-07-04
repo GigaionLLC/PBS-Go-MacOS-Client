@@ -138,8 +138,12 @@ also what the GUI drives: `restore --list` to browse, `restore --file` to pull.
   over the canonical JSON with the `unprotected`/`signature` fields stripped.
   Implemented in `internal/manifest/signing.go` (`Sign`/`JSONSigned`/`Verify`)
   and validated byte-for-byte against PBS's gold test vector.
-- **Keyfile format (follow-up):** the on-disk passphrase-protected keyfile
-  (scrypt-wrapped) is not yet parsed; keys are supplied raw via `--keyfile`.
+- **Keyfile format (implemented):** the PBS on-disk keyfile is both read and
+  written — scrypt/PBKDF2 passphrase-wrapped, or a raw 32-byte / 64-hex key
+  (`internal/crypto/keyfile.go`: `LoadKeyFile`/`EncodeKeyFile`). `pbmac key create`
+  generates one (passphrase from `PBS_ENCRYPTION_PASSWORD`); `--keyfile` accepts
+  any of these forms. Written keys carry `created`/`modified` so the official
+  client reads them too.
 
 ## 6. GUI ↔ CLI contract
 
@@ -149,15 +153,17 @@ shells out to `pbmac` and parses `--json`. The stable per-command JSON shapes
 the GUI can be built and iterated against fixtures on any OS. This keeps the trust
 boundary and the protocol code in one place (the CLI).
 
-**Recommended stack: Tauri.** The GUI's whole job is "spawn a CLI, stream JSON,
-render lists/trees/forms," so native-API depth matters little. Tauri's *sidecar*
-mechanism is the cleanest way to bundle+exec `pbmac` (incl. signing/notarization),
-it feels closer to native than Electron (system WebView), and Windows devs can
-build the whole UI against `CLI-JSON.md` fixtures + a stub `pbmac`, with only a
-thin Rust glue file validated on mac CI. (Electron is the fallback if the team
-wants zero Rust; SwiftUI is the wrong fit for a partly-Windows Go team.) Screens:
-repository/login, snapshot browser (`list`), archive picker (`archives`), file
-restore picker (`restore --list`), restore run, backup config+run.
+**Stack: native SwiftUI (`macos/`).** "Native as Finder" is inherently macOS, so
+the app is a Mac-only SwiftUI + AppKit build: Finder-style Miller-column browser,
+`NSOpenPanel`, drag to/from Finder. It runs the **bundled** `pbmac` for every
+operation (embedded in the app bundle, so it ships as one download), which makes
+the GUI's command surface *identical* to the CLI's rather than a reimplementation.
+An in-app **Console** runs arbitrary `pbmac` commands, each action shows its
+equivalent command with copy, `pbmac://` deep links drive it from a script, and an
+"Install Command-Line Tool" menu symlinks the bundled binary onto `PATH`. Screens:
+Connection & Keys (`login` + `key create`), snapshot browser (`list`), archive
+picker (`archives`), file restore picker (`restore --list`), restore run, backup
+config+run. The design prototype (reviewable on any OS) lives in `gui/`.
 
 ## 7. macOS & APFS considerations
 
@@ -223,9 +229,11 @@ handling — structurally self-checked here), and (b) the **encrypted keyed
 digest** (`CryptConfig`) for dedup. Both are the natural first things to
 exercise once a PBS target is available.
 
-**Highest-risk items — now validated live (PBS 4.2):** encryption wire-compat
-(§5) and pxar encoder→decoder acceptance were the two biggest risks; both plain
-and encrypted backup→restore round-trips are now byte-perfect against a real
-server, and the signed manifest is accepted (reported `sign-only`). The remaining
-interop check is restoring a pbmac-made archive with the official Rust
-`pxar`/PBS client.
+**Highest-risk items — validated live (PBS 4.2):** encryption wire-compat (§5)
+and pxar encoder→decoder acceptance were the two biggest risks; both plain and
+encrypted backup→restore round-trips are byte-perfect against a real server, and
+the signed manifest is accepted (reported `sign-only`). **Interop is confirmed:**
+the official Rust `proxmox-backup-client` restores a pbmac-made archive
+byte-perfect (`.github/workflows/live-validate.yml` → `interop` job). The live
+suite also covers single-file restore, incremental dedup (0 uploads on an
+unchanged re-backup), xattr and BSD-file-flag fidelity, and APFS-snapshot backup.

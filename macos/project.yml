@@ -51,7 +51,9 @@ targets:
           fi
           DEST="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
           mkdir -p "$DEST"
+          VER="${MARKETING_VERSION:-dev}"
+          LDFLAGS="-s -w -X github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/cli.Version=$VER"
           ( cd "$SRCROOT/.." && GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 \
-              go build -trimpath -ldflags "-s -w" -o "$DEST/pbmac" ./cmd/pbmac )
+              go build -trimpath -ldflags "$LDFLAGS" -o "$DEST/pbmac" ./cmd/pbmac )
           chmod +x "$DEST/pbmac"
-          echo "embedded pbmac -> $DEST/pbmac"
+          echo "embedded pbmac $VER -> $DEST/pbmac"

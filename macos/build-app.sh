@@ -16,11 +16,16 @@ xcodegen generate
 
 echo "==> building (Release, arm64)"
 rm -rf build dist
+# PBMAC_VERSION (set by the release workflow) stamps CFBundleShortVersionString
+# and the embedded pbmac's `version`; defaults to the project.yml value otherwise.
+# Passed as one SETTING=value arg (bash-3.2 safe under `set -u`, unlike an array).
+MV="MARKETING_VERSION=${PBMAC_VERSION:-0.1.0}"
 xcodebuild \
   -project PBMac.xcodeproj \
   -target PBMac \
   -configuration Release \
   SYMROOT="$PWD/build" \
+  "$MV" \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
   build
 
