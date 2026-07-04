@@ -31,6 +31,17 @@ const (
 // FormatVersionV2 is the version value serialized in the FORMAT_VERSION item.
 const FormatVersionV2 uint64 = 2
 
+// Entry file-attribute flags carried in the Stat `flags` field. These are the
+// per-entry subset of the pbs-client Flags bit-space (pbs-client/src/pxar/
+// flags.rs). We populate only the bits that have a macOS chflags equivalent; the
+// official Linux client honors immutable/append on restore and ignores the rest.
+const (
+	FlagHidden    uint64 = 0x2000   // DOS HIDDEN     <- macOS UF_HIDDEN
+	FlagAppend    uint64 = 0x10000  // append-only    <- UF_APPEND / SF_APPEND
+	FlagNodump    uint64 = 0x100000 // nodump         <- UF_NODUMP
+	FlagImmutable uint64 = 0x400000 // immutable      <- UF_IMMUTABLE / SF_IMMUTABLE
+)
+
 // SipHash-2-4 keys used for goodbye-table filename hashes (pxar src/format).
 const (
 	hashKey1 uint64 = 0x83ac3f1cfbb450db

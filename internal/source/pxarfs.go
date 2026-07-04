@@ -62,6 +62,9 @@ func (f *LiveDirectoryFS) Stat(p string) (pxar.Meta, error) {
 			return pxar.Meta{}, fmt.Errorf("xattr %s: %w", p, err)
 		}
 		m.Xattrs = xs
+		// BSD file flags (macOS chflags). Symlinks are skipped: darwin has no
+		// lchflags, so a symlink's flags can't be restored without following it.
+		m.Flags = fileFlags(fi)
 	}
 	return m, nil
 }

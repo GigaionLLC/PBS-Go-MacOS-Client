@@ -17,6 +17,7 @@ type Meta struct {
 	MtimeSecs  int64
 	MtimeNanos uint32
 	Size       uint64 // regular-file content size
+	Flags      uint64 // pxar entry file-attribute flags (see format.go Flag*); 0 if none
 	// Xattrs holds extended attributes (name -> raw value); nil if none or the
 	// platform doesn't support them. On macOS these carry com.apple.* attributes
 	// (quarantine, Finder info, tags, resource forks) verbatim as PXAR_XATTR items.
@@ -248,7 +249,7 @@ func (e *Encoder) writePayload(fs Filesystem, path string, size uint64) error {
 func encodeStat(m Meta) []byte {
 	buf := make([]byte, 40)
 	binary.LittleEndian.PutUint64(buf[0:8], m.Mode)
-	binary.LittleEndian.PutUint64(buf[8:16], 0) // flags
+	binary.LittleEndian.PutUint64(buf[8:16], m.Flags)
 	binary.LittleEndian.PutUint32(buf[16:20], m.UID)
 	binary.LittleEndian.PutUint32(buf[20:24], m.GID)
 	binary.LittleEndian.PutUint64(buf[24:32], uint64(m.MtimeSecs))

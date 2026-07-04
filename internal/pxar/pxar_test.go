@@ -73,16 +73,22 @@ func parse(t *testing.T, buf []byte) []item {
 	return items
 }
 
-// xattrCollector records each entry's decoded xattrs by path.
-type xattrCollector struct{ x map[string]map[string][]byte }
+// xattrCollector records each entry's decoded xattrs and flags by path.
+type xattrCollector struct {
+	x     map[string]map[string][]byte
+	flags map[string]uint64
+}
 
 func newXattrCollector() *xattrCollector {
-	return &xattrCollector{x: map[string]map[string][]byte{}}
+	return &xattrCollector{x: map[string]map[string][]byte{}, flags: map[string]uint64{}}
 }
-func (c *xattrCollector) OnDir(p string, m Meta) error { c.x[p] = m.Xattrs; return nil }
+func (c *xattrCollector) OnDir(p string, m Meta) error {
+	c.x[p], c.flags[p] = m.Xattrs, m.Flags
+	return nil
+}
 func (c *xattrCollector) OnFile(p string, m Meta, r io.Reader) error {
 	io.Copy(io.Discard, r)
-	c.x[p] = m.Xattrs
+	c.x[p], c.flags[p] = m.Xattrs, m.Flags
 	return nil
 }
 func (c *xattrCollector) OnSymlink(p string, m Meta, _ string) error { c.x[p] = m.Xattrs; return nil }
@@ -114,7 +120,7 @@ func TestXattrRoundTrip(t *testing.T) {
 
 	fs := memFS{
 		"/":      {meta: Meta{Mode: sIFDIR | 0o755, Xattrs: rootX}, children: []string{"a.txt", "ln"}},
-		"/a.txt": {meta: Meta{Mode: sIFREG | 0o644, Size: 5, Xattrs: fileX}, data: []byte("hello")},
+		"/a.txt": {meta: Meta{Mode: sIFREG | 0o644, Size: 5, Xattrs: fileX, Flags: FlagImmutable | FlagHidden}, data: []byte("hello")},
 		"/ln":    {meta: Meta{Mode: sIFLNK | 0o777, Xattrs: linkX}, target: "a.txt"},
 	}
 
@@ -140,6 +146,11 @@ func TestXattrRoundTrip(t *testing.T) {
 	assertXattrs(t, col.x[""], rootX) // root dir path is ""
 	assertXattrs(t, col.x["/a.txt"], fileX)
 	assertXattrs(t, col.x["/ln"], linkX)
+
+	// The entry flags field must round-trip too.
+	if col.flags["/a.txt"] != FlagImmutable|FlagHidden {
+		t.Errorf("flags = %#x, want %#x", col.flags["/a.txt"], FlagImmutable|FlagHidden)
+	}
 }
 
 func TestEncodeStructure(t *testing.T) {

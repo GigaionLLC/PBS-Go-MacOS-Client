@@ -47,6 +47,9 @@ func (e *Extractor) OnDir(path string, m pxar.Meta) error {
 	}
 	applyXattrs(d, m.Xattrs) // before setTimes: setxattr bumps ctime, not mtime
 	setTimes(d, m)
+	// Apply non-locking flags only: immutable/append on a directory would block
+	// restoring its children (which happens after this call).
+	applyFlags(d, m.Flags&^(pxar.FlagImmutable|pxar.FlagAppend))
 	return nil
 }
 
@@ -73,6 +76,7 @@ func (e *Extractor) OnFile(path string, m pxar.Meta, content io.Reader) error {
 	_ = os.Chmod(d, perm(m.Mode))
 	applyXattrs(d, m.Xattrs)
 	setTimes(d, m)
+	applyFlags(d, m.Flags) // last: immutable/append lock the file
 	return nil
 }
 

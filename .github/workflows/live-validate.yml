@@ -26,6 +26,7 @@ jobs:
       BID: ci-${{ github.run_id }}
       IID: ci-inc-${{ github.run_id }}
       XID: ci-xattr-${{ github.run_id }}
+      FID: ci-flags-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -128,13 +129,32 @@ jobs:
           done
           echo "xattr fidelity OK: xattrs restored byte-for-byte"
 
+      - name: macOS file-flags fidelity (chflags)
+        run: |
+          mkdir -p fl
+          printf 'locked\n' > fl/locked.txt
+          printf 'hidden\n' > fl/hidden.txt
+          chflags uchg fl/locked.txt      # UF_IMMUTABLE (Finder "Locked")
+          chflags hidden fl/hidden.txt    # UF_HIDDEN
+          echo "--- source flags ---"; ls -lO fl
+          ./pbmac backup --id "$FID" test.pxar:fl
+          BT=$(./pbmac list --json | python3 -c "import sys,json;print(max(s['backup-time'] for s in json.load(sys.stdin) if s['backup-id']=='$FID'))")
+          ./pbmac restore --target fl-out "host/$FID/$BT" test.pxar
+          echo "--- restored flags ---"; ls -lO fl-out
+          ls -lO fl-out/locked.txt | grep -qw uchg
+          ls -lO fl-out/hidden.txt | grep -qw hidden
+          diff fl/locked.txt fl-out/locked.txt
+          echo "file-flags fidelity OK: uchg + hidden restored"
+          # clear immutable so workspace cleanup can remove the files
+          chflags nouchg fl/locked.txt fl-out/locked.txt || true
+
       - name: prune test snapshots
         if: always()
         run: |
           IFS=: read -r H P S <<< "$PBS_REPOSITORY"
           if [ -z "$S" ]; then S="$P"; P=8007; fi
           base="https://$H:$P/api2/json/admin/datastore/$S/snapshots"
-          for id in "$BID" "${BID}-enc" "$IID" "$XID"; do
+          for id in "$BID" "${BID}-enc" "$IID" "$XID" "$FID"; do
             [ -z "$id" ] && continue
             curl -k -sS -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" "$base?backup-type=host&backup-id=$id" \
               | python3 -c "import json,sys; [print(s['backup-time']) for s in json.load(sys.stdin).get('data',[])]" \

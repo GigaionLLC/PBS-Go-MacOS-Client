@@ -259,6 +259,7 @@ func (d *Decoder) parseStat(n uint64) (Meta, error) {
 	}
 	return Meta{
 		Mode:       binary.LittleEndian.Uint64(b[0:8]),
+		Flags:      binary.LittleEndian.Uint64(b[8:16]),
 		UID:        binary.LittleEndian.Uint32(b[16:20]),
 		GID:        binary.LittleEndian.Uint32(b[20:24]),
 		MtimeSecs:  int64(binary.LittleEndian.Uint64(b[24:32])),
