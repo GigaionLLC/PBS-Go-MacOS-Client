@@ -161,9 +161,14 @@ lets the GUI be any tech (SwiftUI, Tauri, Electron).
 - **TCC / Full Disk Access:** reading broad user data (Desktop, Documents,
   Photos library) triggers macOS privacy prompts; the app needs Full Disk
   Access for wide backups. Document this in user setup.
-- **pxar fidelity:** macOS file metadata (resource forks, Finder flags,
-  `com.apple.*` xattrs) differs from Linux. v1 preserves standard POSIX
-  metadata + xattrs; exotic Finder metadata is a documented known-gap.
+- **pxar fidelity:** standard POSIX metadata (mode, mtime, symlinks) and
+  **extended attributes are preserved** — captured on darwin via
+  `listxattr`/`getxattr` and restored via `setxattr` (`internal/source` +
+  `internal/restore`, build-tagged), carried as `PXAR_XATTR` items. Because
+  macOS keeps Finder info, tags, quarantine, and even resource forks *as*
+  `com.apple.*` xattrs, those ride along. Known gaps: BSD file flags
+  (`chflags`: `uchg`/hidden — `st_flags`, not xattrs) and POSIX ACLs (a separate
+  pxar item type we don't yet emit).
 
 ## 8. Roadmap
 
