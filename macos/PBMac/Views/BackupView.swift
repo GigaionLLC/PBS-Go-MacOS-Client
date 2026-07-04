@@ -52,7 +52,7 @@ struct BackupView: View {
                     }
                     Divider()
                     LabeledField("Backup ID") {
-                        TextField(Host.current().localizedName ?? "hostname", text: $backupID)
+                        TextField("hostname (default)", text: $backupID)
                             .textFieldStyle(.roundedBorder).frame(maxWidth: 220)
                     }
                     Divider()

@@ -1,5 +1,5 @@
 #if DEBUG
-import Foundation
+import SwiftUI
 
 // Fixtures for Xcode Previews. Shapes match `pbmac --json` (see docs/CLI-JSON.md),
 // so previews exercise the same decoding path as the live app.
