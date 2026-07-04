@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/datablob"
+	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/index"
 	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/manifest"
 	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/protocol"
 	"github.com/GigaionLLC/PBS-Go-MacOS-Client/internal/pxar"
@@ -39,6 +40,21 @@ func Upload(ctx context.Context, c *protocol.Client, snap protocol.Snapshot, arc
 	defer w.Close()
 
 	didx := archiveName + ".didx"
+
+	// Incremental dedup: pull the previous snapshot's index for this archive.
+	// Downloading it also registers its chunks server-side, so we can reference
+	// (reuse) any chunk it contains without re-uploading. Missing/first-backup or
+	// a fetch/parse error simply means a full upload — never fatal.
+	if prev, ok, derr := w.DownloadPrevious(didx); derr == nil && ok {
+		if entries, perr := index.ParseDynamicIndex(prev); perr == nil {
+			known := make(map[[32]byte]struct{}, len(entries))
+			for _, e := range entries {
+				known[e.Digest] = struct{}{}
+			}
+			opts.Known = known
+		}
+	}
+
 	wid, err := w.CreateDynamicIndex(didx)
 	if err != nil {
 		return Result{}, fmt.Errorf("create dynamic index: %w", err)

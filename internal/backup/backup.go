@@ -34,8 +34,10 @@ func (NullSink) Put([32]byte, uint32, []byte) error { return nil }
 type Result struct {
 	ArchiveBytes uint64   `json:"archive_bytes"` // size of the pxar stream
 	TotalChunks  int      `json:"total_chunks"`
-	UniqueChunks int      `json:"unique_chunks"`
+	UniqueChunks int      `json:"unique_chunks"` // new chunks actually uploaded
 	UniqueBytes  uint64   `json:"unique_bytes"`
+	ReusedChunks int      `json:"reused_chunks"` // chunks reused from the previous snapshot
+	ReusedBytes  uint64   `json:"reused_bytes"`
 	IndexCsum    [32]byte `json:"-"`
 	Encrypted    bool     `json:"encrypted"`
 	Compressed   bool     `json:"compressed"`
@@ -51,10 +53,11 @@ func (r Result) DedupRatio() float64 {
 
 // Options controls the pipeline.
 type Options struct {
-	Crypt    *crypto.CryptConfig // non-nil enables AES-256-GCM + keyed digest
-	Compress bool                // zstd-compress chunks
-	Ctime    int64               // index creation time (backup-time)
-	Exclude  *exclude.Matcher    // optional .pxarexclude/--exclude patterns
+	Crypt    *crypto.CryptConfig   // non-nil enables AES-256-GCM + keyed digest
+	Compress bool                  // zstd-compress chunks
+	Ctime    int64                 // index creation time (backup-time)
+	Exclude  *exclude.Matcher      // optional .pxarexclude/--exclude patterns
+	Known    map[[32]byte]struct{} // chunks already on the server (previous snapshot); skip re-upload
 }
 
 // Run streams the pxar archive of fs rooted at root through the full pipeline,
@@ -102,6 +105,15 @@ func Run(fs pxar.Filesystem, root string, sink ChunkSink, opts Options) (Result,
 			return nil
 		}
 		seen[digest] = struct{}{}
+
+		// Incremental dedup: a chunk already present on the server from the
+		// previous snapshot (registered via DownloadPrevious) is referenced by
+		// the index but never re-encoded or re-uploaded.
+		if _, known := opts.Known[digest]; known {
+			res.ReusedChunks++
+			res.ReusedBytes += uint64(c.Length)
+			return nil
+		}
 		res.UniqueChunks++
 		res.UniqueBytes += uint64(c.Length)
 
@@ -129,8 +141,9 @@ func FormatResult(r Result) string {
 		comp = "on"
 	}
 	return fmt.Sprintf(
-		"pxar archive: %s\nchunks: %d (unique %d, %s)\ndedup: %.1f%%  encryption: %s  compression: %s\nindex csum: %x",
+		"pxar archive: %s\nchunks: %d (uploaded %d = %s, reused %d = %s)\ndedup: %.1f%%  encryption: %s  compression: %s\nindex csum: %x",
 		humanBytes(r.ArchiveBytes), r.TotalChunks, r.UniqueChunks, humanBytes(r.UniqueBytes),
+		r.ReusedChunks, humanBytes(r.ReusedBytes),
 		r.DedupRatio()*100, enc, comp, r.IndexCsum,
 	)
 }

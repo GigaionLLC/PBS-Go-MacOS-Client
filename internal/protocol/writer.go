@@ -147,6 +147,32 @@ func (w *BackupWriter) UploadBlob(name string, blob []byte) error {
 	return err
 }
 
+// DownloadPrevious fetches the previous snapshot's index for archiveName (the
+// ".didx" file) over the backup session. Retrieving it also causes the server to
+// register that snapshot's chunk digests in its known-chunks set — which is what
+// lets the subsequent dynamic_index append reference (reuse) those chunks without
+// re-uploading them (src/api2/backup/mod.rs download_previous -> env.register_chunk).
+// ok is false when there is no previous snapshot to base on (the first backup of
+// a group), which is not an error.
+func (w *BackupWriter) DownloadPrevious(archiveName string) (data []byte, ok bool, err error) {
+	q := url.Values{}
+	q.Set("archive-name", archiveName)
+	resp, err := w.request("GET", "/previous", q, nil, "")
+	if err != nil {
+		return nil, false, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512<<20))
+	if err != nil {
+		return nil, false, err
+	}
+	if resp.StatusCode/100 != 2 {
+		// No previous snapshot (or it is unavailable): skip reuse, not an error.
+		return nil, false, nil
+	}
+	return body, true, nil
+}
+
 // Finish commits the backup snapshot. POST finish (no parameters).
 func (w *BackupWriter) Finish() error {
 	resp, err := w.request("POST", "/finish", nil, nil, "")
