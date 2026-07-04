@@ -182,5 +182,9 @@ handling — structurally self-checked here), and (b) the **encrypted keyed
 digest** (`CryptConfig`) for dedup. Both are the natural first things to
 exercise once a PBS target is available.
 
-**Highest-risk item:** encryption wire-compat (§5) and pxar decoder acceptance.
-Budget real time validating against a live PBS, not just unit tests.
+**Highest-risk items — now validated live (PBS 4.2):** encryption wire-compat
+(§5) and pxar encoder→decoder acceptance were the two biggest risks; both plain
+and encrypted backup→restore round-trips are now byte-perfect against a real
+server, and the signed manifest is accepted (reported `sign-only`). The remaining
+interop check is restoring a pbmac-made archive with the official Rust
+`pxar`/PBS client.

@@ -91,16 +91,20 @@ implementation record.
 
 ## 4. Then — the remaining work, in priority order
 
-1. **Live PBS validation** (the big one; needs a server). Ladder:
-   `pbmac ping` → `pbmac list` → `pbmac backup --dry-run` → live `pbmac backup`
-   → `pbmac restore`. Fix whatever the real server / real `pxar` decoder
-   rejects. The inferred-but-unvalidated spots are: pxar decoder acceptance,
-   and the writer endpoint params (high-confidence, ported from source).
-   *Fixed during import (verified against `src/api2/backup/environment.rs`):* the
-   `PUT /dynamic_index` `offset-list` must carry each chunk's **start** offset
-   (0 for the first), not its end — the server validates the offset against its
-   running stream position before adding the chunk's size. This was an
-   upload-blocking bug; exercise it first against a live server.
+1. **Live PBS validation — DONE** (against a live PBS 4.2 server, driven from
+   Windows). The full ladder passed: `pbmac ping` (TLS pinning + API-token auth),
+   `pbmac list`, live `pbmac backup`, and `pbmac restore` — both **plain and
+   encrypted** round-trips are byte-perfect, an encrypted restore without the key
+   fails cleanly, and the signed manifest is accepted (server reports
+   `index.json.blob` as `sign-only`). This required one fix, verified against
+   `src/api2/backup/environment.rs`: the `PUT /dynamic_index` `offset-list` must
+   carry each chunk's **start** offset (0 for the first), not its end — the
+   server validates the offset against its running stream position before adding
+   the chunk's size (was upload-blocking). Still open: interop with the official
+   Rust `pxar`/PBS client (we validated our own encoder↔decoder, and PBS accepts
+   the upload; restoring a pbmac archive with `proxmox-backup-client` is the last
+   cross-tool check). Note: GitHub-hosted CI cannot reach a LAN PBS, so live
+   validation runs locally (or via a self-hosted runner on the PBS network).
 2. **GUI** — separate component; the CLI's `--json` output is the contract.
 3. Optional: chunker tuning (dedup alignment is weak at current params — a
    correctness-neutral quality issue; see the round-trip test's dedup log).
