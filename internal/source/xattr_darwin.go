@@ -2,7 +2,12 @@
 
 package source
 
-import "golang.org/x/sys/unix"
+import (
+	"fmt"
+	"os"
+
+	"golang.org/x/sys/unix"
+)
 
 // aclXattrName is the pseudo-xattr macOS exposes the native (NFSv4/kauth) ACL
 // under. getxattr/setxattr marshal the kauth_filesec blob to/from it (this is how
@@ -41,6 +46,11 @@ func readXattrs(path string) (map[string][]byte, error) {
 	// The ACL pseudo-xattr, present only on files/dirs that carry an ACL.
 	if v, err := getXattrValue(path, aclXattrName); err == nil {
 		xs[aclXattrName] = v
+		if os.Getenv("PBMAC_DEBUG_XATTR") != "" {
+			fmt.Fprintf(os.Stderr, "pbmac-debug: captured %s len=%d on %s\n", aclXattrName, len(v), path)
+		}
+	} else if os.Getenv("PBMAC_DEBUG_XATTR") != "" {
+		fmt.Fprintf(os.Stderr, "pbmac-debug: no %s on %s (%v)\n", aclXattrName, path, err)
 	}
 
 	if len(xs) == 0 {

@@ -156,14 +156,10 @@ jobs:
           chmod +a "everyone deny delete" acl/f.txt      # set a real NFSv4 ACL
           chmod +a "group:staff allow read,write" acl/f.txt
           echo "--- source ACL ---"; ls -le acl/f.txt
-          echo "src listxattr:"; xattr acl/f.txt || true
-          echo "src security xattr len:"; xattr -px com.apple.system.Security acl/f.txt 2>&1 | tr -d ' \n' | wc -c
-          ./pbmac backup --id "$AID" test.pxar:acl
+          PBMAC_DEBUG_XATTR=1 ./pbmac backup --id "$AID" test.pxar:acl
           BT=$(./pbmac list --json | python3 -c "import sys,json;print(max(s['backup-time'] for s in json.load(sys.stdin) if s['backup-id']=='$AID'))")
-          ./pbmac restore --target acl-out "host/$AID/$BT" test.pxar
+          PBMAC_DEBUG_XATTR=1 ./pbmac restore --target acl-out "host/$AID/$BT" test.pxar
           echo "--- restored ACL ---"; ls -le acl-out/f.txt
-          echo "restored listxattr:"; xattr acl-out/f.txt || true
-          echo "restored security xattr len:"; xattr -px com.apple.system.Security acl-out/f.txt 2>&1 | tr -d ' \n' | wc -c
           src=$(ls -le acl/f.txt     | grep -E '^ +[0-9]+:')
           rst=$(ls -le acl-out/f.txt | grep -E '^ +[0-9]+:')
           test -n "$rst"; test "$src" = "$rst"
