@@ -1,14 +1,14 @@
 name: Live PBS validation
 
-# MANUAL ONLY — runs real backup + restore round-trips against a live PBS.
+# MANUAL ONLY — real backup + restore round-trips against a live PBS.
 # GitHub-hosted runners are on the public internet, so the server must be
 # reachable over the WAN (port 8007). Configure three repo secrets first
 # (Settings -> Secrets and variables -> Actions):
-#   PBS_REPOSITORY   <wan-host>:8007:<datastore>
+#   PBS_REPOSITORY   <wan-host>:8007:<datastore>   (our client's format)
 #   PBS_API_TOKEN    USER@REALM!TOKENID:SECRET
 #   PBS_FINGERPRINT  server cert SHA-256 (AA:BB:.. or bare hex)
-# The token only needs DatastoreAdmin on the target datastore. Test snapshots
-# are pruned at the end (even on failure).
+# The token needs DatastoreAdmin (or Datastore.Read+Backup) on the datastore.
+# Test snapshots are pruned at the end (even on failure).
 on:
   workflow_dispatch:
 
@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   live:
-    name: live backup/restore round-trip (macOS arm64)
+    name: backup/restore + xattrs (macOS arm64)
     runs-on: macos-14
     env:
       PBS_REPOSITORY: ${{ secrets.PBS_REPOSITORY }}
@@ -25,9 +25,9 @@ jobs:
       PBS_FINGERPRINT: ${{ secrets.PBS_FINGERPRINT }}
       BID: ci-${{ github.run_id }}
       IID: ci-inc-${{ github.run_id }}
+      XID: ci-xattr-${{ github.run_id }}
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -70,7 +70,7 @@ jobs:
           ./pbmac restore --file /a.txt --target single "host/$BID/$BT_PLAIN" test.pxar
           test "$(cat single/a.txt)" = "hello from CI run $BID"
           test "$(find single -type f | wc -l | tr -d ' ')" = "1"
-          echo "single-file restore OK (only /a.txt, correct content)"
+          echo "single-file restore OK"
 
       - name: encrypted backup -> restore -> verify (+ no-key negative)
         run: |
@@ -80,11 +80,10 @@ jobs:
           echo "BT_ENC=$BT" >> "$GITHUB_ENV"
           ./pbmac restore --keyfile enc.key --target out-enc "host/${BID}-enc/$BT" test.pxar
           diff -r data out-enc
-          echo "encrypted round-trip byte-perfect"
           if ./pbmac restore --target out-nokey "host/${BID}-enc/$BT" test.pxar 2>/dev/null; then
             echo "::error::no-key restore unexpectedly succeeded"; exit 1
           fi
-          echo "no-key restore correctly refused"
+          echo "encrypted round-trip OK; no-key restore refused"
 
       - name: incremental dedup (previous-snapshot reuse)
         run: |
@@ -93,7 +92,6 @@ jobs:
           printf 'v1\n' > inc/docs/notes.txt
           ./pbmac backup --id "$IID" test.pxar:inc >/dev/null
           sleep 2 # PBS snapshots are second-granularity; ensure a newer timestamp
-          # Re-back-up unchanged: expect 0 uploads, all chunks reused.
           ./pbmac backup --id "$IID" --json test.pxar:inc > inc2.json
           cat inc2.json
           python3 - <<'PY'
@@ -103,11 +101,24 @@ jobs:
           assert r['reused_chunks'] > 0, "expected chunk reuse from the previous snapshot"
           print(f"incremental reuse OK: uploaded 0, reused {r['reused_chunks']} chunks")
           PY
-          # The reused snapshot must still restore byte-perfect.
           BT=$(./pbmac list --json | python3 -c "import sys,json;print(max(s['backup-time'] for s in json.load(sys.stdin) if s['backup-id']=='$IID'))")
           ./pbmac restore --target inc-out "host/$IID/$BT" test.pxar
           diff -r inc inc-out
           echo "incremental snapshot restores byte-perfect"
+
+      - name: macOS xattr fidelity (real listxattr/getxattr/setxattr)
+        run: |
+          mkdir -p xa
+          printf 'xattr payload\n' > xa/f.txt
+          xattr -w com.pbmac.test1 "hello-value-123" xa/f.txt          # string attr
+          xattr -wx com.pbmac.bin "de ad be ef 00 11" xa/f.txt         # binary attr (incl. a NUL)
+          ./pbmac backup --id "$XID" test.pxar:xa
+          BT=$(./pbmac list --json | python3 -c "import sys,json;print(max(s['backup-time'] for s in json.load(sys.stdin) if s['backup-id']=='$XID'))")
+          ./pbmac restore --target xa-out "host/$XID/$BT" test.pxar
+          diff xa/f.txt xa-out/f.txt
+          test "$(xattr -p com.pbmac.test1 xa-out/f.txt)" = "hello-value-123"
+          test "$(xattr -px com.pbmac.bin xa-out/f.txt | tr -d ' \n')" = "deadbeef0011"
+          echo "xattr fidelity OK: string + binary xattrs restored byte-for-byte"
 
       - name: prune test snapshots
         if: always()
@@ -115,10 +126,9 @@ jobs:
           IFS=: read -r H P S <<< "$PBS_REPOSITORY"
           if [ -z "$S" ]; then S="$P"; P=8007; fi
           base="https://$H:$P/api2/json/admin/datastore/$S/snapshots"
-          for id in "$BID" "${BID}-enc" "$IID"; do
+          for id in "$BID" "${BID}-enc" "$IID" "$XID"; do
             [ -z "$id" ] && continue
-            curl -k -sS -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" \
-              "$base?backup-type=host&backup-id=$id" \
+            curl -k -sS -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" "$base?backup-type=host&backup-id=$id" \
               | python3 -c "import json,sys; [print(s['backup-time']) for s in json.load(sys.stdin).get('data',[])]" \
               | while read -r t; do
                   curl -k -sS -o /dev/null -w "  del $id/$t http=%{http_code}\n" -X DELETE \
@@ -127,3 +137,80 @@ jobs:
                 done
           done
           echo "pruned test snapshots"
+
+  interop:
+    name: interop — official proxmox-backup-client restores our archive
+    runs-on: ubuntu-latest
+    env:
+      PBS_REPOSITORY: ${{ secrets.PBS_REPOSITORY }}
+      PBS_API_TOKEN: ${{ secrets.PBS_API_TOKEN }}
+      PBS_FINGERPRINT: ${{ secrets.PBS_FINGERPRINT }}
+      IID: ci-interop-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: check secrets are set
+        run: |
+          if [ -z "$PBS_REPOSITORY" ] || [ -z "$PBS_API_TOKEN" ] || [ -z "$PBS_FINGERPRINT" ]; then
+            echo "::error::secrets not set"; exit 1
+          fi
+
+      - name: install proxmox-backup-client
+        run: |
+          set -euo pipefail
+          sudo wget -q https://enterprise.proxmox.com/debian/proxmox-release-bookworm.gpg \
+            -O /etc/apt/trusted.gpg.d/proxmox-release-bookworm.gpg
+          echo "deb [arch=amd64] http://download.proxmox.com/debian/pbs-client bookworm main" \
+            | sudo tee /etc/apt/sources.list.d/pbs-client.list
+          sudo apt-get update
+          sudo apt-get install -y proxmox-backup-client
+          proxmox-backup-client version
+
+      - name: build pbmac and back up a tree
+        run: |
+          go build -trimpath -o pbmac ./cmd/pbmac
+          mkdir -p tree/sub
+          printf 'interop root file\n' > tree/a.txt
+          printf 'nested interop bytes\n' > tree/sub/b.txt
+          head -c 5000000 /dev/urandom > tree/blob.bin
+          ./pbmac backup --id "$IID" test.pxar:tree
+
+      - name: restore with proxmox-backup-client and diff
+        run: |
+          set -euo pipefail
+          # Our secret is host:port:store + token user@realm!tok:secret; the official
+          # client wants user@realm!tok@host:port:store + PBS_PASSWORD=secret.
+          IFS=: read -r H P S <<< "$PBS_REPOSITORY"
+          if [ -z "$S" ]; then S="$P"; P=8007; fi
+          TOKENID="${PBS_API_TOKEN%:*}"; SECRET="${PBS_API_TOKEN##*:}"
+          export PBS_REPOSITORY="${TOKENID}@${H}:${P}:${S}"
+          export PBS_PASSWORD="$SECRET"
+          echo "official-client repository: ${TOKENID}@${H}:${P}:${S}"
+          BT=$(proxmox-backup-client snapshot list --output-format json \
+               | jq -r --arg id "$IID" '[.[] | select(.["backup-id"]==$id) | .["backup-time"]] | max')
+          ISO=$(date -u -d "@$BT" +%Y-%m-%dT%H:%M:%SZ)
+          SNAP="host/$IID/$ISO"
+          echo "restoring $SNAP"
+          mkdir -p restored
+          proxmox-backup-client restore "$SNAP" test.pxar ./restored/
+          diff -r tree restored
+          echo "INTEROP OK: proxmox-backup-client restored our pbmac archive byte-perfect"
+
+      - name: prune
+        if: always()
+        run: |
+          IFS=: read -r H P S <<< "$PBS_REPOSITORY"
+          if [ -z "$S" ]; then S="$P"; P=8007; fi
+          base="https://$H:$P/api2/json/admin/datastore/$S/snapshots"
+          curl -k -sS -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" "$base?backup-type=host&backup-id=$IID" \
+            | python3 -c "import json,sys; [print(s['backup-time']) for s in json.load(sys.stdin).get('data',[])]" \
+            | while read -r t; do
+                curl -k -sS -o /dev/null -w "  del $IID/$t http=%{http_code}\n" -X DELETE \
+                  -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" \
+                  "$base?backup-type=host&backup-id=$IID&backup-time=$t"
+              done
+          echo "pruned interop snapshot"
