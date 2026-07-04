@@ -1,0 +1,92 @@
+name: Live PBS validation
+
+# MANUAL ONLY — runs a real backup + restore round-trip against a live PBS.
+# GitHub-hosted runners are on the public internet, so the server must be
+# reachable over the WAN (port 8007). Configure three repo secrets first
+# (Settings -> Secrets and variables -> Actions):
+#   PBS_REPOSITORY   <wan-host>:8007:<datastore>   (e.g. 203.0.113.9:8007:cephfs-ssd-datastore)
+#   PBS_API_TOKEN    USER@REALM!TOKENID:SECRET
+#   PBS_FINGERPRINT  server cert SHA-256 (AA:BB:.. or bare hex)
+# The token only needs DatastoreAdmin on the target datastore. Test snapshots
+# are pruned at the end (even on failure).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: live backup/restore round-trip (macOS arm64)
+    runs-on: macos-14
+    env:
+      PBS_REPOSITORY: ${{ secrets.PBS_REPOSITORY }}
+      PBS_API_TOKEN: ${{ secrets.PBS_API_TOKEN }}
+      PBS_FINGERPRINT: ${{ secrets.PBS_FINGERPRINT }}
+      BID: ci-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: check secrets are set
+        run: |
+          if [ -z "$PBS_REPOSITORY" ] || [ -z "$PBS_API_TOKEN" ] || [ -z "$PBS_FINGERPRINT" ]; then
+            echo "::error::Set PBS_REPOSITORY, PBS_API_TOKEN and PBS_FINGERPRINT repo secrets first."
+            exit 1
+          fi
+
+      - name: build pbmac
+        run: go build -trimpath -o pbmac ./cmd/pbmac
+
+      - name: ping + list (auth + TLS pin)
+        run: |
+          ./pbmac ping
+          ./pbmac list
+
+      - name: prepare test tree
+        run: |
+          mkdir -p data/sub
+          printf 'hello from CI run %s\n' "$BID" > data/a.txt
+          printf 'nested bytes\n' > data/sub/b.txt
+          head -c 40000 /dev/urandom > data/blob.bin
+
+      - name: plain backup -> restore -> verify
+        run: |
+          ./pbmac backup --id "$BID" test.pxar:data
+          BT=$(./pbmac list --json | python3 -c "import sys,json;print([s['backup-time'] for s in json.load(sys.stdin) if s['backup-id']=='$BID'][-1])")
+          echo "BT_PLAIN=$BT" >> "$GITHUB_ENV"
+          ./pbmac restore --target out "host/$BID/$BT" test.pxar
+          diff -r data out
+          echo "plain round-trip byte-perfect"
+
+      - name: encrypted backup -> restore -> verify (+ no-key negative)
+        run: |
+          openssl rand -hex 32 > enc.key
+          ./pbmac backup --id "${BID}-enc" --keyfile enc.key test.pxar:data
+          BT=$(./pbmac list --json | python3 -c "import sys,json;print([s['backup-time'] for s in json.load(sys.stdin) if s['backup-id']=='${BID}-enc'][-1])")
+          echo "BT_ENC=$BT" >> "$GITHUB_ENV"
+          ./pbmac restore --keyfile enc.key --target out-enc "host/${BID}-enc/$BT" test.pxar
+          diff -r data out-enc
+          echo "encrypted round-trip byte-perfect"
+          if ./pbmac restore --target out-nokey "host/${BID}-enc/$BT" test.pxar 2>/dev/null; then
+            echo "::error::no-key restore unexpectedly succeeded"; exit 1
+          fi
+          echo "no-key restore correctly refused"
+
+      - name: prune test snapshots
+        if: always()
+        run: |
+          IFS=: read -r H P S <<< "$PBS_REPOSITORY"
+          if [ -z "$S" ]; then S="$P"; P=8007; fi   # host:store form -> default port
+          for spec in "$BID:$BT_PLAIN" "${BID}-enc:$BT_ENC"; do
+            id=${spec%:*}; bt=${spec##*:}
+            [ -z "$bt" ] && continue
+            echo "deleting host/$id/$bt from $S"
+            curl -k -sS -o /dev/null -w "  http=%{http_code}\n" -X DELETE \
+              -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" \
+              "https://$H:$P/api2/json/admin/datastore/$S/snapshots?backup-type=host&backup-id=$id&backup-time=$bt" || true
+          done
