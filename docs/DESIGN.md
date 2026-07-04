@@ -166,9 +166,16 @@ lets the GUI be any tech (SwiftUI, Tauri, Electron).
   `listxattr`/`getxattr` and restored via `setxattr` (`internal/source` +
   `internal/restore`, build-tagged), carried as `PXAR_XATTR` items. Because
   macOS keeps Finder info, tags, quarantine, and even resource forks *as*
-  `com.apple.*` xattrs, those ride along. Known gaps: BSD file flags
-  (`chflags`: `uchg`/hidden — `st_flags`, not xattrs) and POSIX ACLs (a separate
-  pxar item type we don't yet emit).
+  `com.apple.*` xattrs, those ride along. Remaining metadata items, in order of
+  relevance:
+  - **POSIX ACLs** — a legitimate gap: pxar has dedicated `PXAR_ACL_*` item types
+    that the official Linux client emits; we don't yet.
+  - **BSD file flags** (`chflags`: immutable/append/nodump/hidden) — **not** a
+    parity gap. The official client is Linux-only and never captures them (Linux
+    has no `chflags`). The pxar ENTRY has a `flags` field the Linux client fills
+    from Linux `chattr` attributes; only immutable/append/nodump overlap with
+    macOS `chflags`, and even those are ignored on a Linux restore — so carrying
+    them would be a low-value macOS-only nicety, not fidelity parity. Deferred.
 
 ## 8. Roadmap
 
