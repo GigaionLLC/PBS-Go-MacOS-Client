@@ -6,13 +6,16 @@ The goal is parity with what Linux gets from the official
 `proxmox-backup-client`: **back up and restore files** to/from a PBS datastore,
 with client-side encryption, over the reverse-engineered PBS wire protocol.
 
-> **Status: backup & restore validated against a live PBS 4.2 server.** Both
-> plain and encrypted backup→restore round-trips are byte-perfect end-to-end
-> (`ping` → `list` → `backup` → `restore`); the manifest HMAC signature matches
-> PBS's gold test vector and is accepted by the server (reported `sign-only`).
-> Every wire/on-disk format is ported byte-for-byte from the Proxmox source and
-> unit-tested. Remaining: interop-restore of a pbmac archive with the official
-> Rust client. See [`docs/DESIGN.md`](docs/DESIGN.md).
+> **Status: usable for real backup & restore, validated against a live PBS 4.2
+> server.** Plain and encrypted backup→restore round-trips are byte-perfect
+> end-to-end and continuously exercised on macOS CI: large multi-chunk files,
+> thousands of files, deep trees, special/unicode names, single-file restore, and
+> **incremental dedup** (a re-backup of unchanged data uploads 0 and reuses
+> everything; edits send only the delta). The content-defined chunker is a
+> byte-exact port of PBS's buzhash, and the manifest HMAC signature matches PBS's
+> gold vector (server reports `sign-only`). Remaining: macOS xattr fidelity and
+> interop-restore with the official Rust client. See
+> [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Features
 

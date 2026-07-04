@@ -45,7 +45,7 @@ internal/config      on-disk config + credential handling (Keychain later)
 internal/source      Source abstraction: where bytes to back up come from
                        - LiveDirectorySource   (v1: read files live)
                        - SnapshotSource        (v2: tmutil-backed APFS snapshot)
-internal/chunker     content-defined chunking (rolling hash) + SHA-256 digests
+internal/chunker     content-defined chunking (PBS-exact buzhash) + SHA-256 digests
 internal/pxar        pxar archive encode (backup) / decode (restore)   [stub]
 internal/crypto      AES-256-GCM chunk encryption + PBS keyfile format
 internal/protocol    PBS HTTP/2 client: writer (upload) + reader (download) [stub]
@@ -95,8 +95,12 @@ GET `file-name`; `chunk` GET `digest`.
    - (`fixed_*` equivalents exist for block images; not needed for file backup.)
 3. Upload the `index.json.blob` / manifest and `PUT /finish`.
 
-Dedup: before uploading a chunk, the client may check whether the server
-already has that digest (previous-snapshot "known chunks") and skip re-upload.
+Dedup (implemented): the client downloads the previous snapshot's index
+(`GET /previous`, which also registers those chunks in the server's known-chunks
+set) and skips re-uploading any chunk whose digest is already present, so repeat
+backups only send changed data. The content-defined chunker is a byte-exact port
+of PBS's buzhash (`pbs-datastore/src/chunker.rs`), so boundaries align with the
+server's and unchanged regions re-sync after edits.
 
 ### 4.2 Restore (reader) session
 
