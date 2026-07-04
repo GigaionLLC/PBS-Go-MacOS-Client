@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: build & test (macOS arm64)
+    runs-on: macos-14 # Apple Silicon — the real release target
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: build (all packages)
+        run: go build ./...
+
+      - name: test (race detector)
+        run: go test -race ./...
+
+      - name: build native arm64 binary
+        run: go build -trimpath -o pbmac ./cmd/pbmac
+
+      - name: smoke — version
+        run: ./pbmac version
+
+      - name: smoke — dry-run backup (offline pipeline)
+        run: |
+          mkdir -p smoke/sub
+          printf 'hello pbmac'   > smoke/a.txt
+          printf 'nested bytes'  > smoke/sub/b.txt
+          ./pbmac backup --dry-run root.pxar:smoke
+
+      - name: smoke — encrypted dry-run backup (keyed digest path)
+        run: ./pbmac backup --dry-run --encrypt root.pxar:smoke
+
+      - name: upload arm64 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: pbmac-darwin-arm64
+          path: pbmac
+          if-no-files-found: error
+
+  cross-compile:
+    name: cross-compile check (linux host)
+    runs-on: ubuntu-latest # fast build-tag regression check for the darwin target
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: cross-compile darwin/arm64
+        run: GOOS=darwin GOARCH=arm64 go build ./...
+
+      - name: vet darwin/arm64 (build-tag regressions)
+        run: GOOS=darwin GOARCH=arm64 go vet ./...

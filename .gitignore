@@ -1,0 +1,13 @@
+# Build output
+/pbmac
+/pbmac.exe
+/pbmac-darwin-arm64
+/pbmac-darwin-arm64.sha256
+*.test
+
+# CI / local smoke-test scratch
+/smoke/
+
+# Local config / secrets
+*.key
+key.json
