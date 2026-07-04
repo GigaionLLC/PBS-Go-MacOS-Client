@@ -70,7 +70,7 @@ struct RestoreSheet: View {
                 Button("Restore", action: run)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(target == nil)
+                    .disabled(target == nil || (model.selectedArchive?.isEncrypted == true && !model.hasKey))
             }
         }
     }

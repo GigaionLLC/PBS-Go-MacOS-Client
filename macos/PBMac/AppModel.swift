@@ -163,7 +163,12 @@ final class AppModel {
                 excludes: [String], id: String?) async throws -> BackupResult {
         var args = ["backup"]
         if encrypt {
-            if let key = keyfilePath.nilIfEmpty { args += ["--keyfile", key] } else { args.append("--encrypt") }
+            // Refuse to encrypt without a persisted key: a per-backup ephemeral
+            // key would be discarded, making the snapshot unrecoverable.
+            guard let key = keyfilePath.nilIfEmpty else {
+                throw PBMacError(message: "Encryption is on but no key is set. Add or generate a key in Connection & Keys, or turn Encrypt off.")
+            }
+            args += ["--keyfile", key]
         }
         if compress { args.append("--compress") }
         for glob in excludes where !glob.isEmpty { args += ["--exclude", glob] }

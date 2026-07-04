@@ -40,6 +40,50 @@ func parseArchiveSpec(spec string) (archive, path string, err error) {
 	return spec[:i], spec[i+1:], nil
 }
 
+// reorderArgs hoists flag arguments (and their values) ahead of positional
+// arguments so a command works no matter where the flags appear. Go's flag
+// package stops parsing at the first positional, so `archives host/x/1 --json`
+// would otherwise drop --json; GUIs and humans reasonably expect it to work.
+// Flags are recognized against fs (so value-taking flags consume their value);
+// everything after a literal "--" is treated as positional. Call before fs.Parse.
+func reorderArgs(fs *flag.FlagSet, args []string) []string {
+	var flags, positional []string
+	sawTerminator := false
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			sawTerminator = true
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+		if len(a) < 2 || a[0] != '-' {
+			positional = append(positional, a)
+			continue
+		}
+		// A flag token. "-name=value" is self-contained.
+		name := strings.TrimLeft(a, "-")
+		if strings.IndexByte(name, '=') >= 0 {
+			flags = append(flags, a)
+			continue
+		}
+		flags = append(flags, a)
+		// A defined, non-boolean flag consumes the next token as its value.
+		if f := fs.Lookup(name); f != nil && !isBoolFlag(f) && i+1 < len(args) {
+			flags = append(flags, args[i+1])
+			i++
+		}
+	}
+	if sawTerminator {
+		flags = append(flags, "--")
+	}
+	return append(flags, positional...)
+}
+
+func isBoolFlag(f *flag.Flag) bool {
+	bf, ok := f.Value.(interface{ IsBoolFlag() bool })
+	return ok && bf.IsBoolFlag()
+}
+
 // EnvKeyPassword holds the passphrase for a password-protected keyfile.
 const envKeyPassword = "PBS_ENCRYPTION_PASSWORD"
 
@@ -50,27 +94,28 @@ func loadKey(path string) (*crypto.Key, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Raw key material is unambiguous by length, so match it before the JSON
+	// heuristic — a random 32-byte key can legitimately begin with '{'.
+	var k crypto.Key
+	if len(data) == crypto.KeySize {
+		copy(k[:], data)
+		return &k, nil
+	}
+	if trimmed := strings.TrimSpace(string(data)); len(trimmed) == crypto.KeySize*2 {
+		if b, err := hex.DecodeString(trimmed); err == nil {
+			copy(k[:], b)
+			return &k, nil
+		}
+		// Not valid hex — fall through to the keyfile path.
+	}
 	if crypto.LooksLikeKeyFile(data) {
-		k, err := crypto.LoadKeyFile(data, []byte(os.Getenv(envKeyPassword)))
+		key, err := crypto.LoadKeyFile(data, []byte(os.Getenv(envKeyPassword)))
 		if err != nil {
 			return nil, err
 		}
-		return &k, nil
+		return &key, nil
 	}
-	var k crypto.Key
-	switch {
-	case len(data) == crypto.KeySize:
-		copy(k[:], data)
-	case len(strings.TrimSpace(string(data))) == crypto.KeySize*2:
-		b, err := hex.DecodeString(strings.TrimSpace(string(data)))
-		if err != nil {
-			return nil, fmt.Errorf("keyfile is not valid hex: %w", err)
-		}
-		copy(k[:], b)
-	default:
-		return nil, fmt.Errorf("keyfile must be a PBS JSON keyfile, %d raw bytes, or %d hex chars", crypto.KeySize, crypto.KeySize*2)
-	}
-	return &k, nil
+	return nil, fmt.Errorf("keyfile must be a PBS JSON keyfile, %d raw bytes, or %d hex chars", crypto.KeySize, crypto.KeySize*2)
 }
 
 // emitJSON pretty-prints v to stdout as JSON and returns exit 0.
@@ -104,12 +149,18 @@ func cmdBackup(args []string) int {
 	var excludes stringSlice
 	fs.Var(&excludes, "exclude", "exclude glob pattern (repeatable); .pxarexclude in the root is also read")
 	outputJSON := fs.Bool("json", false, "emit JSON output")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderArgs(fs, args)); err != nil {
 		return 2
 	}
 	jsonMode = *outputJSON
 	if fs.NArg() != 1 {
 		return fail("backup: expected exactly one NAME.pxar:/path argument")
+	}
+	// A real (non-dry-run) --encrypt without a keyfile would encrypt with a
+	// random key that is immediately discarded, making the backup unrecoverable.
+	// Refuse it; dry-run may still use an ephemeral key since it uploads nothing.
+	if !*dryRun && *encrypt && *keyfile == "" {
+		return fail("backup: --encrypt needs a --keyfile for a real backup (an ephemeral key would be discarded, leaving the backup unrecoverable) — create one with `pbmac key create`")
 	}
 	archive, path, err := parseArchiveSpec(fs.Arg(0))
 	if err != nil {
@@ -305,7 +356,7 @@ func cmdRestore(args []string) int {
 	file := fs.String("file", "", "restore only this single path from the archive")
 	keyfile := fs.String("keyfile", "", "path to the decryption key (for encrypted backups)")
 	outputJSON := fs.Bool("json", false, "emit JSON output")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderArgs(fs, args)); err != nil {
 		return 2
 	}
 	jsonMode = *outputJSON
@@ -508,6 +559,9 @@ func cmdKeyCreate(args []string) int {
 	if err != nil {
 		return fail("key create: %v", err)
 	}
+	// Ensure 0600 even when --force overwrites a pre-existing, looser-permission
+	// file (O_TRUNC keeps the old mode; the perm arg only applies on create).
+	_ = f.Chmod(0o600)
 	if _, err := f.Write(blob); err != nil {
 		_ = f.Close()
 		return fail("key create: %v", err)
@@ -540,7 +594,7 @@ func cmdArchives(args []string) int {
 	fs := flag.NewFlagSet("archives", flag.ContinueOnError)
 	repoFlag := fs.String("repo", "", "repository spec (overrides env/config)")
 	outputJSON := fs.Bool("json", false, "emit JSON output")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(reorderArgs(fs, args)); err != nil {
 		return 2
 	}
 	jsonMode = *outputJSON

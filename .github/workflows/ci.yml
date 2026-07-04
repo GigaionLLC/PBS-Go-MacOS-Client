@@ -46,6 +46,9 @@ jobs:
       - name: smoke — encrypted dry-run backup (keyed digest path)
         run: ./pbmac backup --dry-run --encrypt root.pxar:smoke
 
+      - name: smoke — GUI arg order (flags after positional parse; stdout is JSON)
+        run: ./pbmac backup --dry-run root.pxar:smoke --json | python3 -c "import sys,json; json.load(sys.stdin)"
+
       - name: upload arm64 binary
         uses: actions/upload-artifact@v4
         with:

@@ -11,10 +11,11 @@ import (
 )
 
 // Extractor writes decoded entries to a destination directory. If Only is set,
-// only that archive path (and its ancestor directories) is materialized.
+// that archive path is materialized: the target itself, its ancestor directories
+// (so it can be reached), and — when the target is a directory — its whole subtree.
 type Extractor struct {
 	Dest  string
-	Only  string // e.g. "/sub/file.txt"; empty = extract everything
+	Only  string // e.g. "/sub/file.txt" or "/sub"; empty = extract everything
 	Files int    // count of files written (for the restore summary)
 	Bytes uint64 // total bytes written
 }
@@ -25,8 +26,11 @@ func (e *Extractor) want(path string) bool {
 	if e.Only == "" || path == "" {
 		return true
 	}
-	// Extract the target itself and any directory on its path.
-	return path == e.Only || strings.HasPrefix(e.Only, path+"/")
+	// The target itself, any ancestor directory on its path (needed to reach it),
+	// or — when the target is a directory — anything beneath it.
+	return path == e.Only ||
+		strings.HasPrefix(e.Only, path+"/") ||
+		strings.HasPrefix(path, e.Only+"/")
 }
 
 func (e *Extractor) dest(path string) string {

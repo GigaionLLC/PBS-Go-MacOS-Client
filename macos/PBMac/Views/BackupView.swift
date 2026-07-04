@@ -56,7 +56,7 @@ struct BackupView: View {
                             .textFieldStyle(.roundedBorder).frame(maxWidth: 220)
                     }
                     Divider()
-                    LabeledField("Encrypt", detail: model.hasKey ? "AES-256-GCM with your key" : "no key set — a per-backup key is used") {
+                    LabeledField("Encrypt", detail: model.hasKey ? "AES-256-GCM with your key" : "needs a key — set one in Connection & Keys") {
                         Toggle("", isOn: $encrypt).labelsHidden().toggleStyle(.switch)
                     }
                     Divider()
@@ -72,10 +72,16 @@ struct BackupView: View {
                 .padding(6)
             }
 
+            if encrypt && !model.hasKey {
+                Label("Encryption is on but no key is set — add one in Connection & Keys, or turn Encrypt off.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+
             HStack {
                 Button("Back Up", action: run)
                     .buttonStyle(.borderedProminent)
-                    .disabled(source == nil || archiveName.isEmpty)
+                    .disabled(source == nil || archiveName.isEmpty || (encrypt && !model.hasKey))
                 if let source {
                     Text(commandPreview(source: source))
                         .font(.caption.monospaced()).foregroundStyle(.tertiary)

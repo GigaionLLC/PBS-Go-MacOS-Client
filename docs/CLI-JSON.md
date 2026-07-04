@@ -14,6 +14,10 @@ the exit code is non-zero:
 
 Exit codes: `0` success, `1` runtime failure, `2` usage/flag error.
 
+**Flag position.** Flags (including `--json`) may appear before or after positional
+arguments — the CLI hoists them before parsing — so `archives host/mymac/1 --json`
+and `archives --json host/mymac/1` are equivalent.
+
 **Specs.** A *snapshot* is `backup-type/backup-id/backup-time` (e.g.
 `host/mymac/1700000000`). A *backup archive spec* is `NAME.pxar:/abs/path`.
 
