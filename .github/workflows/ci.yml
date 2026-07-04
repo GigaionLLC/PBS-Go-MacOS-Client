@@ -69,3 +69,26 @@ jobs:
 
       - name: vet darwin/arm64 (build-tag regressions)
         run: GOOS=darwin GOARCH=arm64 go vet ./...
+
+  gui-macos:
+    name: build SwiftUI app (macOS)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install xcodegen
+        run: brew install xcodegen
+
+      - name: generate Xcode project
+        working-directory: macos
+        run: xcodegen generate
+
+      - name: build app (no signing)
+        working-directory: macos
+        run: |
+          xcodebuild \
+            -project PBMac.xcodeproj \
+            -target PBMac \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build

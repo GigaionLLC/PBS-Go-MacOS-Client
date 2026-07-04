@@ -1,0 +1,32 @@
+# XcodeGen spec. On a Mac:  brew install xcodegen && cd macos && xcodegen && open PBMac.xcodeproj
+# The .xcodeproj is generated (gitignored); this file is the source of truth.
+name: PBMac
+options:
+  bundleIdPrefix: com.gigaion
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.9"
+    DEVELOPMENT_LANGUAGE: en
+
+targets:
+  PBMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: PBMac
+    settings:
+      base:
+        PRODUCT_NAME: "Proxmox Backup"
+        PRODUCT_BUNDLE_IDENTIFIER: com.gigaion.pbmac
+        INFOPLIST_FILE: PBMac/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: NO
+        COMBINE_HIDPI_IMAGES: YES
+        ENABLE_PREVIEWS: YES

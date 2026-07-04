@@ -8,6 +8,14 @@
 # CI / local smoke-test scratch
 /smoke/
 
+# macOS GUI (XcodeGen-generated project + Xcode build state)
+/macos/PBMac.xcodeproj/
+/macos/*.xcworkspace/
+/macos/DerivedData/
+/macos/build/
+.DS_Store
+xcuserdata/
+
 # Local config / secrets
 *.key
 key.json
