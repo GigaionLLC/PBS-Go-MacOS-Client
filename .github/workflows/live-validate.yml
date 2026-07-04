@@ -118,9 +118,15 @@ jobs:
           ./pbmac restore --target xa-out "host/$XID/$BT" test.pxar
           echo "--- restored xattrs ---"; xattr -l xa-out/f.txt || true
           diff xa/f.txt xa-out/f.txt
-          test "$(xattr -p com.pbmac.test1 xa-out/f.txt)" = "hello-value-123"
-          test "$(xattr -px com.pbmac.bin xa-out/f.txt | tr -d ' \n')" = "deadbeef0011"
-          echo "xattr fidelity OK: string + binary xattrs restored byte-for-byte"
+          # Compare each xattr value source-vs-restored via hex (robust to the exact
+          # `xattr -px` formatting); a missing attr yields empty and fails.
+          for name in com.pbmac.test1 com.pbmac.bin; do
+            src=$(xattr -px "$name" xa/f.txt | tr -d ' \n')
+            rst=$(xattr -px "$name" xa-out/f.txt | tr -d ' \n')
+            echo "$name: src=$src rst=$rst"
+            test -n "$rst"; test "$src" = "$rst"
+          done
+          echo "xattr fidelity OK: xattrs restored byte-for-byte"
 
       - name: prune test snapshots
         if: always()
