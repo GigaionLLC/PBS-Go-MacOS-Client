@@ -20,11 +20,11 @@ xcodebuild \
   -project PBMac.xcodeproj \
   -target PBMac \
   -configuration Release \
-  -derivedDataPath build \
+  SYMROOT="$PWD/build" \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
   build
 
-APP=$(find build/Build/Products/Release -maxdepth 1 -name '*.app' | head -1)
+APP=$(find build/Release -maxdepth 1 -name '*.app' | head -1)
 [ -n "$APP" ] || { echo "no .app produced"; exit 1; }
 
 # Re-sign the whole bundle (including the embedded pbmac) ad-hoc so the seal is

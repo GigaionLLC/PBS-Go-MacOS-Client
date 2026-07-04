@@ -103,14 +103,14 @@ jobs:
             -project PBMac.xcodeproj \
             -target PBMac \
             -configuration Debug \
-            -derivedDataPath build \
+            SYMROOT="$PWD/build" \
             CODE_SIGNING_ALLOWED=NO \
             build
 
       - name: verify pbmac is embedded and runs
         working-directory: macos
         run: |
-          APP=$(find build/Build/Products -maxdepth 2 -name '*.app' | head -1)
+          APP=$(find build -maxdepth 2 -name '*.app' | head -1)
           echo "app bundle: $APP"
           test -x "$APP/Contents/Resources/pbmac" || { echo "pbmac not embedded"; exit 1; }
           "$APP/Contents/Resources/pbmac" version
