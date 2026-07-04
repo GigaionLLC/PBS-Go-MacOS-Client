@@ -44,7 +44,8 @@ func (f *LiveDirectoryFS) real(p string) string {
 // POSIX owner/mode/mtime from the os.FileInfo is platform-specific (metaFromInfo
 // lives in meta_unix.go / meta_windows.go).
 func (f *LiveDirectoryFS) Stat(p string) (pxar.Meta, error) {
-	fi, err := os.Lstat(f.real(p))
+	real := f.real(p)
+	fi, err := os.Lstat(real)
 	if err != nil {
 		return pxar.Meta{}, err
 	}
@@ -52,6 +53,12 @@ func (f *LiveDirectoryFS) Stat(p string) (pxar.Meta, error) {
 	if err != nil {
 		return pxar.Meta{}, fmt.Errorf("stat %s: %w", p, err)
 	}
+	// Extended attributes (macOS com.apple.*; no-op off darwin).
+	xs, err := readXattrs(real)
+	if err != nil {
+		return pxar.Meta{}, fmt.Errorf("xattr %s: %w", p, err)
+	}
+	m.Xattrs = xs
 	return m, nil
 }
 

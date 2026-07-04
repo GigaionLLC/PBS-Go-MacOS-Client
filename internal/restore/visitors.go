@@ -45,6 +45,7 @@ func (e *Extractor) OnDir(path string, m pxar.Meta) error {
 	if err := os.MkdirAll(d, perm(m.Mode)|0o700); err != nil {
 		return err
 	}
+	applyXattrs(d, m.Xattrs) // before setTimes: setxattr bumps ctime, not mtime
 	setTimes(d, m)
 	return nil
 }
@@ -70,6 +71,7 @@ func (e *Extractor) OnFile(path string, m pxar.Meta, content io.Reader) error {
 		return err
 	}
 	_ = os.Chmod(d, perm(m.Mode))
+	applyXattrs(d, m.Xattrs)
 	setTimes(d, m)
 	return nil
 }
@@ -84,7 +86,11 @@ func (e *Extractor) OnSymlink(path string, m pxar.Meta, target string) error {
 		return err
 	}
 	_ = os.Remove(d)
-	return os.Symlink(target, d)
+	if err := os.Symlink(target, d); err != nil {
+		return err
+	}
+	applyXattrs(d, m.Xattrs) // NOFOLLOW binds to the link itself
+	return nil
 }
 
 // ListEntry is one entry produced by Lister.

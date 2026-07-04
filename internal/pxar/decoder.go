@@ -2,6 +2,7 @@ package pxar
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -102,30 +103,30 @@ func (d *Decoder) Walk(v Visitor) error {
 	if err != nil {
 		return err
 	}
+	xs, next, err := d.collectMeta()
+	if err != nil {
+		return err
+	}
+	meta.Xattrs = xs
 	if err := v.OnDir("", meta); err != nil {
 		return err
 	}
-	return d.walkDir("", v)
+	return d.walkDir("", next, v)
 }
 
-// walkDir decodes items until the directory's GOODBYE.
-func (d *Decoder) walkDir(dirPath string, v Visitor) error {
-	// Skip any metadata items attached to this directory's ENTRY.
+// walkDir decodes a directory's children starting from h — the first item after
+// the directory's ENTRY and xattrs — until the GOODBYE.
+func (d *Decoder) walkDir(dirPath string, h itemHeader, v Visitor) error {
 	for {
-		h, err := d.readHeader()
-		if err != nil {
-			return err
-		}
-		if isMetadata(h.htype) {
+		switch {
+		case isMetadata(h.htype):
+			// Defensive: xattrs are collected per-entry; nothing else expected here.
 			if err := d.skip(h.content); err != nil {
 				return err
 			}
-			continue
-		}
-		switch h.htype {
-		case Goodbye:
+		case h.htype == Goodbye:
 			return d.skip(h.content)
-		case Filename:
+		case h.htype == Filename:
 			name, err := d.readName(h.content)
 			if err != nil {
 				return err
@@ -135,6 +136,10 @@ func (d *Decoder) walkDir(dirPath string, v Visitor) error {
 			}
 		default:
 			return fmt.Errorf("pxar: unexpected item %#x in directory %q", h.htype, dirPath)
+		}
+		var err error
+		if h, err = d.readHeader(); err != nil {
+			return err
 		}
 	}
 }
@@ -152,35 +157,34 @@ func (d *Decoder) decodeChild(path string, v Visitor) error {
 	if err != nil {
 		return err
 	}
+	// Collect this entry's xattrs (skipping other metadata); next is the first
+	// content item (SYMLINK / PAYLOAD, or the first child FILENAME / GOODBYE).
+	xs, next, err := d.collectMeta()
+	if err != nil {
+		return err
+	}
+	meta.Xattrs = xs
 
 	switch {
 	case meta.isDir():
 		if err := v.OnDir(path, meta); err != nil {
 			return err
 		}
-		return d.walkDir(path, v)
+		return d.walkDir(path, next, v)
 	case meta.isLink():
-		th, err := d.nextNonMeta()
-		if err != nil {
-			return err
+		if next.htype != Symlink {
+			return fmt.Errorf("pxar: expected SYMLINK for %q, got %#x", path, next.htype)
 		}
-		if th.htype != Symlink {
-			return fmt.Errorf("pxar: expected SYMLINK for %q, got %#x", path, th.htype)
-		}
-		target, err := d.readName(th.content)
+		target, err := d.readName(next.content)
 		if err != nil {
 			return err
 		}
 		return v.OnSymlink(path, meta, target)
 	case meta.isReg():
-		ph, err := d.nextNonMeta()
-		if err != nil {
-			return err
+		if next.htype != Payload {
+			return fmt.Errorf("pxar: expected PAYLOAD for %q, got %#x", path, next.htype)
 		}
-		if ph.htype != Payload {
-			return fmt.Errorf("pxar: expected PAYLOAD for %q, got %#x", path, ph.htype)
-		}
-		lr := &io.LimitedReader{R: d.r, N: int64(ph.content)}
+		lr := &io.LimitedReader{R: d.r, N: int64(next.content)}
 		if err := v.OnFile(path, meta, lr); err != nil {
 			return err
 		}
@@ -190,21 +194,45 @@ func (d *Decoder) decodeChild(path string, v Visitor) error {
 	}
 }
 
-// nextNonMeta reads the next header, skipping metadata items.
-func (d *Decoder) nextNonMeta() (itemHeader, error) {
+// collectMeta reads the items that follow an ENTRY: XATTR items are collected
+// into a name->value map, other metadata (ACLs, fcaps, quota) is skipped, and
+// the first non-metadata header (the entry's content item) is returned.
+func (d *Decoder) collectMeta() (map[string][]byte, itemHeader, error) {
+	var xs map[string][]byte
 	for {
 		h, err := d.readHeader()
 		if err != nil {
-			return itemHeader{}, err
+			return nil, itemHeader{}, err
+		}
+		if h.htype == Xattr {
+			b, err := d.readContent(h.content)
+			if err != nil {
+				return nil, itemHeader{}, err
+			}
+			name, val := parseXattr(b)
+			if xs == nil {
+				xs = make(map[string][]byte)
+			}
+			xs[name] = val
+			continue
 		}
 		if isMetadata(h.htype) {
 			if err := d.skip(h.content); err != nil {
-				return itemHeader{}, err
+				return nil, itemHeader{}, err
 			}
 			continue
 		}
-		return h, nil
+		return xs, h, nil
 	}
+}
+
+// parseXattr splits a PXAR_XATTR body (name + NUL + raw value) into name+value.
+func parseXattr(b []byte) (string, []byte) {
+	i := bytes.IndexByte(b, 0)
+	if i < 0 {
+		return string(b), nil
+	}
+	return string(b[:i]), append([]byte(nil), b[i+1:]...)
 }
 
 // readName reads a null-terminated name/target of the given content length.

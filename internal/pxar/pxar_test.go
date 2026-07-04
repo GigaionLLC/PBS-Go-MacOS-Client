@@ -73,6 +73,75 @@ func parse(t *testing.T, buf []byte) []item {
 	return items
 }
 
+// xattrCollector records each entry's decoded xattrs by path.
+type xattrCollector struct{ x map[string]map[string][]byte }
+
+func newXattrCollector() *xattrCollector {
+	return &xattrCollector{x: map[string]map[string][]byte{}}
+}
+func (c *xattrCollector) OnDir(p string, m Meta) error { c.x[p] = m.Xattrs; return nil }
+func (c *xattrCollector) OnFile(p string, m Meta, r io.Reader) error {
+	io.Copy(io.Discard, r)
+	c.x[p] = m.Xattrs
+	return nil
+}
+func (c *xattrCollector) OnSymlink(p string, m Meta, _ string) error { c.x[p] = m.Xattrs; return nil }
+
+func assertXattrs(t *testing.T, got, want map[string][]byte) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("xattr count = %d, want %d (got %v)", len(got), len(want), got)
+	}
+	for k, v := range want {
+		if !bytes.Equal(got[k], v) {
+			t.Errorf("xattr %q = %v, want %v", k, got[k], v)
+		}
+	}
+}
+
+// TestXattrRoundTrip checks that XATTR items encode after the ENTRY and survive a
+// decode, with macOS-style names carried verbatim (dir, file, symlink; incl. a
+// 32-byte FinderInfo and an empty-value attr).
+func TestXattrRoundTrip(t *testing.T) {
+	rootX := map[string][]byte{"com.apple.metadata:kMDItemWhereFroms": {1, 2, 3, 4}}
+	fileX := map[string][]byte{
+		"com.apple.quarantine": []byte("0083;deadbeef;Safari;"),
+		"com.apple.FinderInfo": bytes.Repeat([]byte{0xAB}, 32),
+		"user.comment":         []byte("hello xattr"),
+		"user.empty":           {},
+	}
+	linkX := map[string][]byte{"com.apple.tag": []byte("Red\n4")}
+
+	fs := memFS{
+		"/":      {meta: Meta{Mode: sIFDIR | 0o755, Xattrs: rootX}, children: []string{"a.txt", "ln"}},
+		"/a.txt": {meta: Meta{Mode: sIFREG | 0o644, Size: 5, Xattrs: fileX}, data: []byte("hello")},
+		"/ln":    {meta: Meta{Mode: sIFLNK | 0o777, Xattrs: linkX}, target: "a.txt"},
+	}
+
+	var buf bytes.Buffer
+	if err := NewEncoder(&buf).Encode(fs, "/"); err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+
+	// Structure: root is FORMAT_VERSION, ENTRY, then its single XATTR item.
+	items := parse(t, buf.Bytes())
+	if items[1].htype != Entry || items[2].htype != Xattr {
+		t.Fatalf("expected ENTRY then XATTR, got %#x %#x", items[1].htype, items[2].htype)
+	}
+	// The XATTR body is name + NUL + value.
+	if want := append(append([]byte("com.apple.metadata:kMDItemWhereFroms"), 0), 1, 2, 3, 4); !bytes.Equal(items[2].content, want) {
+		t.Fatalf("xattr body = %v, want %v", items[2].content, want)
+	}
+
+	col := newXattrCollector()
+	if err := NewDecoder(&buf).Walk(col); err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	assertXattrs(t, col.x[""], rootX) // root dir path is ""
+	assertXattrs(t, col.x["/a.txt"], fileX)
+	assertXattrs(t, col.x["/ln"], linkX)
+}
+
 func TestEncodeStructure(t *testing.T) {
 	fs := memFS{
 		"/":          dir("file.txt", "sub"),

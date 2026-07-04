@@ -17,6 +17,10 @@ type Meta struct {
 	MtimeSecs  int64
 	MtimeNanos uint32
 	Size       uint64 // regular-file content size
+	// Xattrs holds extended attributes (name -> raw value); nil if none or the
+	// platform doesn't support them. On macOS these carry com.apple.* attributes
+	// (quarantine, Finder info, tags, resource forks) verbatim as PXAR_XATTR items.
+	Xattrs map[string][]byte
 }
 
 func (m Meta) isDir() bool  { return m.Mode&sIFMT == sIFDIR }
@@ -75,6 +79,9 @@ func (e *Encoder) encodeDir(fs Filesystem, dirPath string, meta Meta) error {
 	if err := e.writeItem(Entry, encodeStat(meta)); err != nil {
 		return err
 	}
+	if err := e.writeXattrs(meta.Xattrs); err != nil {
+		return err
+	}
 
 	names, err := fs.ReadDir(dirPath)
 	if err != nil {
@@ -108,6 +115,9 @@ func (e *Encoder) encodeDir(fs Filesystem, dirPath string, meta Meta) error {
 			if err := e.writeItem(Entry, encodeStat(cm)); err != nil {
 				return err
 			}
+			if err := e.writeXattrs(cm.Xattrs); err != nil {
+				return err
+			}
 			target, err := fs.Readlink(child)
 			if err != nil {
 				return fmt.Errorf("readlink %s: %w", child, err)
@@ -117,6 +127,9 @@ func (e *Encoder) encodeDir(fs Filesystem, dirPath string, meta Meta) error {
 			}
 		case cm.isReg():
 			if err := e.writeItem(Entry, encodeStat(cm)); err != nil {
+				return err
+			}
+			if err := e.writeXattrs(cm.Xattrs); err != nil {
 				return err
 			}
 			if err := e.writePayload(fs, child, cm.Size); err != nil {
@@ -159,6 +172,35 @@ func (e *Encoder) writeGoodbye(entryOffset uint64, items []goodbyeItem) error {
 	content = append(content, scratch[:]...)
 
 	return e.writeItem(Goodbye, content)
+}
+
+// writeXattrs emits one PXAR_XATTR item per attribute, immediately after the
+// entry's ENTRY item and before its FILENAME/PAYLOAD/SYMLINK. Names are sorted
+// for a stable archive; each item's content is name + NUL + raw value.
+func (e *Encoder) writeXattrs(xs map[string][]byte) error {
+	if len(xs) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(xs))
+	for name := range xs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if err := e.writeItem(Xattr, encodeXattr(name, xs[name])); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// encodeXattr builds a PXAR_XATTR item body: name + one NUL + raw value.
+func encodeXattr(name string, value []byte) []byte {
+	b := make([]byte, 0, len(name)+1+len(value))
+	b = append(b, name...)
+	b = append(b, 0)
+	b = append(b, value...)
+	return b
 }
 
 // writeItem writes a header (htype + full_size) followed by content.
