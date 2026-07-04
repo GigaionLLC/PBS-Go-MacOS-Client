@@ -11,3 +11,8 @@
 # Local config / secrets
 *.key
 key.json
+
+# Local credentials env file (real creds live here; never commit — see .env.example)
+.env
+.env.*
+!.env.example

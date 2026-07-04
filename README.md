@@ -83,6 +83,18 @@ pbmac restore host/mymac/1700000000 home.pxar --keyfile key.json --target ./out
 `--json` is available on `ping`, `list`, `backup`, and `restore --list` for
 scripting and for a GUI front-end.
 
+### Testing against a server
+
+pbmac reads `PBS_REPOSITORY`, `PBS_API_TOKEN`, and `PBS_FINGERPRINT` from the
+environment. For local testing, copy [`.env.example`](.env.example) to `.env`
+(gitignored — real creds never get committed), fill it in, and load it:
+
+```sh
+cp .env.example .env      # then edit .env
+set -a; source ./.env; set +a
+go build -o pbmac ./cmd/pbmac && ./pbmac ping && ./pbmac list
+```
+
 ## Design & protocol notes
 
 See [`docs/DESIGN.md`](docs/DESIGN.md) for the architecture, the PBS protocol
