@@ -1,0 +1,570 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Proxmox Backup</title>
+<style>*{margin:0;padding:0;box-sizing:border-box}html,body{height:100%}</style>
+</head>
+<body>
+<style>
+  :root{
+    --bg:#e9e9eb; --content:#ffffff; --content2:#f7f7f9;
+    --sidebar:rgba(245,245,247,.78); --sidebar-solid:#f0f0f2;
+    --text:#1d1d1f; --text2:#7d7d84; --text3:#a2a2a9;
+    --sep:#e2e2e6; --sep-strong:#d3d3d8;
+    --accent:#0a84ff; --accent-weak:rgba(10,132,255,.14);
+    --green:#30c257; --red:#ff453a; --amber:#ff9f0a;
+    --row-hover:rgba(0,0,0,.045);
+    --field:#ffffff; --field-border:#d7d7dc;
+    --shadow:0 22px 70px -12px rgba(0,0,0,.34),0 0 0 .5px rgba(0,0,0,.12);
+    --radius:11px;
+    --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Segoe UI",system-ui,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#161618; --content:#1e1e20; --content2:#232326;
+      --sidebar:rgba(38,38,42,.72); --sidebar-solid:#262629;
+      --text:#f4f4f6; --text2:#98989f; --text3:#6d6d75;
+      --sep:#333338; --sep-strong:#3d3d43;
+      --accent:#0a84ff; --accent-weak:rgba(10,132,255,.22);
+      --green:#30d158; --red:#ff453a; --amber:#ff9f0a;
+      --row-hover:rgba(255,255,255,.055);
+      --field:#2c2c30; --field-border:#48484e;
+      --shadow:0 26px 80px -10px rgba(0,0,0,.6),0 0 0 .5px rgba(255,255,255,.09);
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#e9e9eb; --content:#ffffff; --content2:#f7f7f9;
+    --sidebar:rgba(245,245,247,.78); --sidebar-solid:#f0f0f2;
+    --text:#1d1d1f; --text2:#7d7d84; --text3:#a2a2a9;
+    --sep:#e2e2e6; --sep-strong:#d3d3d8; --accent-weak:rgba(10,132,255,.14);
+    --row-hover:rgba(0,0,0,.045); --field:#fff; --field-border:#d7d7dc;
+    --shadow:0 22px 70px -12px rgba(0,0,0,.34),0 0 0 .5px rgba(0,0,0,.12);
+  }
+  :root[data-theme="dark"]{
+    --bg:#161618; --content:#1e1e20; --content2:#232326;
+    --sidebar:rgba(38,38,42,.72); --sidebar-solid:#262629;
+    --text:#f4f4f6; --text2:#98989f; --text3:#6d6d75;
+    --sep:#333338; --sep-strong:#3d3d43; --accent-weak:rgba(10,132,255,.22);
+    --row-hover:rgba(255,255,255,.055); --field:#2c2c30; --field-border:#48484e;
+    --shadow:0 26px 80px -10px rgba(0,0,0,.6),0 0 0 .5px rgba(255,255,255,.09);
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:var(--font);color:var(--text);
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+    background:
+      radial-gradient(120% 120% at 18% -8%,#4a6fb0 0%,#2f4d86 34%,#20355e 70%,#182747 100%);
+    display:grid;place-items:center;min-height:100vh;padding:34px;
+  }
+  @media (prefers-color-scheme:dark){body{background:radial-gradient(120% 120% at 18% -8%,#2a3350 0%,#1c2136 40%,#12151f 100%)}}
+  :root[data-theme="light"] body{background:radial-gradient(120% 120% at 18% -8%,#4a6fb0 0%,#2f4d86 34%,#20355e 70%,#182747 100%)}
+  :root[data-theme="dark"] body{background:radial-gradient(120% 120% at 18% -8%,#2a3350 0%,#1c2136 40%,#12151f 100%)}
+
+  .win{
+    width:min(1060px,100%);height:min(700px,86vh);
+    background:var(--content);border-radius:var(--radius);box-shadow:var(--shadow);
+    display:flex;flex-direction:column;overflow:hidden;
+  }
+
+  /* ---- title bar ---- */
+  .titlebar{
+    height:52px;flex:none;display:flex;align-items:center;gap:14px;padding:0 14px;
+    border-bottom:.5px solid var(--sep);background:var(--sidebar-solid);
+  }
+  .lights{display:flex;gap:8px}
+  .light{width:12px;height:12px;border-radius:50%;border:.5px solid rgba(0,0,0,.14)}
+  .light.r{background:#ff5f57}.light.y{background:#febc2e}.light.g{background:#28c840}
+  .tb-title{font-size:13px;font-weight:600;letter-spacing:.1px}
+  .tb-title .sub{color:var(--text2);font-weight:500}
+  .tb-spacer{flex:1}
+  .tb-btn{
+    display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:7px;
+    border:.5px solid var(--field-border);background:var(--field);color:var(--text);
+    font-size:12.5px;font-weight:500;cursor:pointer;
+  }
+  .tb-btn:hover{background:var(--row-hover)}
+  .tb-btn.primary{background:var(--accent);border-color:transparent;color:#fff}
+  .tb-btn.primary:hover{filter:brightness(1.06)}
+  .tb-btn[disabled]{opacity:.4;pointer-events:none}
+
+  /* ---- body ---- */
+  .body{flex:1;display:flex;min-height:0}
+
+  .sidebar{
+    width:224px;flex:none;background:var(--sidebar);border-right:.5px solid var(--sep);
+    padding:12px 10px;display:flex;flex-direction:column;gap:16px;
+    backdrop-filter:saturate(180%) blur(20px);
+  }
+  .conn{
+    display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:9px;
+    background:var(--content);border:.5px solid var(--sep);
+  }
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--green);flex:none;
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--green) 22%,transparent)}
+  .conn .h{font-size:12.5px;font-weight:600;line-height:1.25}
+  .conn .s{font-size:11px;color:var(--text2);line-height:1.3}
+  .nav-label{font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--text3);padding:0 8px 2px}
+  .nav{display:flex;flex-direction:column;gap:2px}
+  .nav a{
+    display:flex;align-items:center;gap:9px;height:30px;padding:0 9px;border-radius:7px;
+    font-size:13px;font-weight:500;color:var(--text);cursor:pointer;user-select:none;
+  }
+  .nav a:hover{background:var(--row-hover)}
+  .nav a.on{background:var(--accent);color:#fff}
+  .nav a.on svg{stroke:#fff}
+  .nav a svg{width:16px;height:16px;stroke:var(--accent);stroke-width:1.7;fill:none;flex:none}
+  .grow{flex:1}
+  .hint{font-size:11px;color:var(--text3);padding:0 8px;line-height:1.4}
+
+  .main{flex:1;display:flex;flex-direction:column;min-width:0;background:var(--content)}
+  .view{flex:1;min-height:0;display:none;flex-direction:column}
+  .view.on{display:flex}
+
+  /* ---- snapshots ---- */
+  .snap-split{flex:1;display:flex;min-height:0}
+  .snap-list{width:250px;flex:none;border-right:.5px solid var(--sep);overflow:auto;background:var(--content2)}
+  .list-head{font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--text3);padding:12px 14px 6px}
+  .snap{
+    display:flex;gap:10px;padding:9px 14px;cursor:pointer;border-bottom:.5px solid var(--sep);align-items:flex-start;
+  }
+  .snap:hover{background:var(--row-hover)}
+  .snap.on{background:var(--accent)}
+  .snap.on *{color:#fff!important}
+  .snap.on .snap-ico{background:rgba(255,255,255,.22)}
+  .snap-ico{width:30px;height:30px;border-radius:7px;background:var(--accent-weak);display:grid;place-items:center;flex:none}
+  .snap-ico svg{width:16px;height:16px;stroke:var(--accent);stroke-width:1.7;fill:none}
+  .snap-meta{min-width:0;flex:1}
+  .snap-id{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .snap-when{font-size:11.5px;color:var(--text2);margin-top:1px}
+  .snap-size{font-size:11px;color:var(--text3);font-variant-numeric:tabular-nums;margin-top:1px}
+  .badge{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.3px;padding:1px 5px;border-radius:4px;
+    background:var(--accent-weak);color:var(--accent);vertical-align:middle;margin-left:5px}
+
+  .browser-wrap{flex:1;display:flex;flex-direction:column;min-width:0}
+  .crumbs{height:34px;flex:none;display:flex;align-items:center;gap:5px;padding:0 14px;border-bottom:.5px solid var(--sep);
+    font-size:12px;color:var(--text2);overflow:hidden;white-space:nowrap}
+  .crumbs b{color:var(--text);font-weight:600}
+  .crumbs .chev{color:var(--text3)}
+  .columns{flex:1;display:flex;overflow-x:auto;min-height:0}
+  .col{width:238px;flex:none;border-right:.5px solid var(--sep);overflow-y:auto}
+  .cell{display:flex;align-items:center;gap:8px;padding:5px 10px 5px 12px;cursor:default;font-size:13px}
+  .cell:hover{background:var(--row-hover)}
+  .cell.sel{background:var(--accent);color:#fff}
+  .cell.sel svg{stroke:#fff}
+  .cell.sel .csize{color:rgba(255,255,255,.8)}
+  .cell.checked{background:var(--accent-weak)}
+  .cell svg{width:15px;height:15px;stroke:var(--accent);stroke-width:1.6;fill:none;flex:none}
+  .cell .cname{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .cell .csize{font-size:11px;color:var(--text3);font-variant-numeric:tabular-nums}
+  .cell .chev{width:12px;height:12px;stroke:var(--text3)}
+  .cell .check{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--field-border);flex:none;display:grid;place-items:center}
+  .cell .check.on{background:var(--accent);border-color:var(--accent)}
+  .cell .check.on svg{width:11px;height:11px;stroke:#fff;stroke-width:2.4}
+  .empty{display:grid;place-items:center;height:100%;color:var(--text3);font-size:13px;text-align:center;padding:22px;gap:8px}
+  .empty svg{width:38px;height:38px;stroke:var(--text3);stroke-width:1.3;fill:none;opacity:.7}
+
+  .actionbar{
+    height:46px;flex:none;display:flex;align-items:center;gap:12px;padding:0 14px;
+    border-top:.5px solid var(--sep);background:var(--sidebar-solid);
+  }
+  .sel-count{font-size:12.5px;color:var(--text2)}
+  .sel-count b{color:var(--text);font-variant-numeric:tabular-nums}
+
+  /* ---- back up view ---- */
+  .backup{flex:1;overflow:auto;display:flex;justify-content:center;padding:26px}
+  .panel{width:min(560px,100%);display:flex;flex-direction:column;gap:16px}
+  .panel h2{font-size:19px;font-weight:700;margin:0;letter-spacing:-.2px}
+  .panel .lead{font-size:13px;color:var(--text2);margin:-8px 0 2px;line-height:1.4}
+  .card{background:var(--content2);border:.5px solid var(--sep);border-radius:10px;padding:4px 14px}
+  .field{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:.5px solid var(--sep)}
+  .field:last-child{border-bottom:0}
+  .field .flabel{font-size:13px;font-weight:500;flex:none;width:112px}
+  .field .fbody{flex:1;display:flex;align-items:center;gap:8px;justify-content:flex-end;min-width:0}
+  .path{flex:1;display:flex;align-items:center;gap:8px;background:var(--field);border:.5px solid var(--field-border);
+    border-radius:7px;padding:7px 10px;font-size:12.5px;min-width:0}
+  .path svg{width:15px;height:15px;stroke:var(--accent);fill:none;stroke-width:1.6;flex:none}
+  .path span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text2)}
+  .path span.set{color:var(--text)}
+  input.txt{background:var(--field);border:.5px solid var(--field-border);border-radius:7px;padding:7px 10px;
+    font-size:12.5px;font-family:var(--font);color:var(--text);width:190px}
+  input.txt:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+  .toggle{width:38px;height:23px;border-radius:23px;background:var(--sep-strong);position:relative;cursor:pointer;transition:background .18s;flex:none}
+  .toggle::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:#fff;
+    box-shadow:0 1px 3px rgba(0,0,0,.28);transition:transform .18s}
+  .toggle.on{background:var(--green)}
+  .toggle.on::after{transform:translateX(15px)}
+  .fdesc{font-size:11px;color:var(--text3);margin-top:2px}
+
+  .runbar{display:flex;align-items:center;gap:12px}
+  .btn{height:34px;padding:0 18px;border-radius:8px;border:none;font-size:13.5px;font-weight:600;cursor:pointer;font-family:var(--font)}
+  .btn.primary{background:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.ghost{background:transparent;border:.5px solid var(--field-border);color:var(--text)}
+  .btn:disabled{opacity:.45;pointer-events:none}
+
+  /* progress */
+  .progress{display:none;flex-direction:column;gap:14px}
+  .progress.on{display:flex}
+  .bar{height:6px;border-radius:6px;background:var(--sep);overflow:hidden}
+  .bar > i{display:block;height:100%;width:0;background:var(--accent);border-radius:6px;transition:width .3s ease}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .stat{background:var(--content2);border:.5px solid var(--sep);border-radius:9px;padding:10px 12px}
+  .stat .k{font-size:10.5px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--text3)}
+  .stat .v{font-size:17px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums;letter-spacing:-.3px}
+  .stat .v small{font-size:11px;font-weight:600;color:var(--text2)}
+  .phase{font-size:12.5px;color:var(--text2);display:flex;align-items:center;gap:8px}
+  .spin{width:14px;height:14px;border:2px solid var(--sep-strong);border-top-color:var(--accent);border-radius:50%;animation:sp .7s linear infinite}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .done-badge{display:flex;align-items:center;gap:8px;color:var(--green);font-weight:600;font-size:13px}
+  .done-badge svg{width:18px;height:18px;stroke:var(--green);stroke-width:2;fill:none}
+
+  /* ---- restore sheet ---- */
+  .scrim{position:absolute;inset:0;background:rgba(0,0,0,.28);opacity:0;pointer-events:none;transition:opacity .25s;z-index:20}
+  .scrim.on{opacity:1;pointer-events:auto}
+  .sheet{
+    position:absolute;top:0;left:50%;transform:translate(-50%,-104%);
+    width:min(460px,86%);background:var(--content);border-radius:0 0 13px 13px;
+    box-shadow:0 24px 50px rgba(0,0,0,.35);z-index:30;transition:transform .3s cubic-bezier(.2,.9,.3,1);
+    padding:22px;display:flex;flex-direction:column;gap:15px;
+  }
+  .sheet.on{transform:translate(-50%,0)}
+  .sheet h3{margin:0;font-size:16px;font-weight:700}
+  .sheet .rlead{font-size:12.5px;color:var(--text2);line-height:1.45;margin:-6px 0 0}
+  .rlist{background:var(--content2);border:.5px solid var(--sep);border-radius:8px;max-height:118px;overflow:auto;padding:4px 0}
+  .ritem{display:flex;align-items:center;gap:8px;padding:4px 12px;font-size:12.5px}
+  .ritem svg{width:14px;height:14px;stroke:var(--accent);fill:none;stroke-width:1.6;flex:none}
+  .ritem .rsz{margin-left:auto;font-size:11px;color:var(--text3);font-variant-numeric:tabular-nums}
+  .sheet-actions{display:flex;gap:10px;justify-content:flex-end}
+  .rprog{display:none;flex-direction:column;gap:9px}
+  .rprog.on{display:flex}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation-duration:.001ms!important}}
+</style>
+
+<div class="win" role="application" aria-label="Proxmox Backup">
+  <div class="titlebar">
+    <div class="lights"><span class="light r"></span><span class="light y"></span><span class="light g"></span></div>
+    <div class="tb-title" id="tbTitle">Snapshots <span class="sub">· cephfs-ssd-datastore</span></div>
+    <div class="tb-spacer"></div>
+    <button class="tb-btn" id="refreshBtn" title="Refresh">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 11a8 8 0 10-2.3 5.7M20 11V5m0 6h-6"/></svg>
+    </button>
+  </div>
+
+  <div class="body">
+    <aside class="sidebar">
+      <div class="conn">
+        <span class="dot"></span>
+        <div>
+          <div class="h">fslave32-lan</div>
+          <div class="s">gomactest@pbs · Connected</div>
+        </div>
+      </div>
+      <div>
+        <div class="nav-label">Library</div>
+        <nav class="nav" id="nav">
+          <a data-view="snapshots" class="on">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+            Snapshots
+          </a>
+          <a data-view="backup">
+            <svg viewBox="0 0 24 24"><path d="M12 19V6m0 0l-5 5m5-5l5 5"/><path d="M5 21h14"/></svg>
+            Back Up
+          </a>
+        </nav>
+      </div>
+      <div class="grow"></div>
+      <div class="hint">Restores and backups run through the <b>pbmac</b> CLI. This window drives its <code>--json</code> output.</div>
+    </aside>
+
+    <div class="main">
+      <!-- SNAPSHOTS -->
+      <section class="view on" id="v-snapshots">
+        <div class="snap-split">
+          <div class="snap-list" id="snapList">
+            <div class="list-head">host / mymac</div>
+          </div>
+          <div class="browser-wrap">
+            <div class="crumbs" id="crumbs"><span class="chev">Select a snapshot to browse its files</span></div>
+            <div class="columns" id="columns"></div>
+            <div class="actionbar">
+              <div class="sel-count" id="selCount">No files selected</div>
+              <div class="tb-spacer"></div>
+              <button class="tb-btn primary" id="restoreBtn" disabled>Restore…</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- BACK UP -->
+      <section class="view" id="v-backup">
+        <div class="backup">
+          <div class="panel">
+            <h2>Back Up a Folder</h2>
+            <p class="lead">Snapshot a directory to your PBS datastore. Only changed data is uploaded — unchanged chunks are reused from the previous snapshot.</p>
+
+            <div id="backupForm">
+              <div class="card">
+                <div class="field">
+                  <div class="flabel">Source</div>
+                  <div class="fbody">
+                    <div class="path" id="srcPath"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg><span>Choose a folder…</span></div>
+                    <button class="tb-btn" id="chooseBtn">Choose…</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <div class="flabel">Snapshot ID</div>
+                  <div class="fbody"><input class="txt" id="bid" value="mymac" spellcheck="false"></div>
+                </div>
+                <div class="field">
+                  <div>
+                    <div class="flabel" style="width:auto">Encrypt</div>
+                    <div class="fdesc">AES-256-GCM, client-side</div>
+                  </div>
+                  <div class="fbody"><div class="toggle on" data-opt="encrypt"></div></div>
+                </div>
+                <div class="field">
+                  <div>
+                    <div class="flabel" style="width:auto">Compress</div>
+                    <div class="fdesc">zstd chunk compression</div>
+                  </div>
+                  <div class="fbody"><div class="toggle" data-opt="compress"></div></div>
+                </div>
+                <div class="field">
+                  <div class="flabel">Exclude</div>
+                  <div class="fbody"><input class="txt" id="excl" placeholder="node_modules/, *.log" spellcheck="false" style="width:230px"></div>
+                </div>
+              </div>
+              <div class="runbar" style="margin-top:16px">
+                <button class="btn primary" id="runBackup">Back Up</button>
+                <span class="fdesc" id="cmdPreview" style="font-family:ui-monospace,Menlo,monospace"></span>
+              </div>
+            </div>
+
+            <div class="progress" id="backupProgress">
+              <div class="phase" id="bPhase"><span class="spin"></span> Encoding pxar archive…</div>
+              <div class="bar"><i id="bBar"></i></div>
+              <div class="stats">
+                <div class="stat"><div class="k">Uploaded</div><div class="v" id="sUp">0 <small>chunks</small></div></div>
+                <div class="stat"><div class="k">Reused</div><div class="v" id="sRe">0 <small>chunks</small></div></div>
+                <div class="stat"><div class="k">Dedup</div><div class="v" id="sDe">0<small>%</small></div></div>
+                <div class="stat"><div class="k">Sent</div><div class="v" id="sBy">0 <small>MB</small></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- restore sheet -->
+  <div class="scrim" id="scrim"></div>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Restore files">
+    <div id="rsetup">
+      <h3>Restore <span id="rCount">2 items</span></h3>
+      <p class="rlead">Choose where to put the selected files. They'll be written from the snapshot exactly as backed up.</p>
+      <div class="rlist" id="rList"></div>
+      <div class="field" style="border:0;padding:12px 0 2px">
+        <div class="flabel">Restore to</div>
+        <div class="fbody">
+          <div class="path" id="destPath"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg><span class="set">~/Restored</span></div>
+          <button class="tb-btn" id="destBtn">Choose…</button>
+        </div>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn ghost" id="rCancel">Cancel</button>
+        <button class="btn primary" id="rGo">Restore</button>
+      </div>
+    </div>
+    <div class="rprog" id="rprog">
+      <div class="phase" id="rPhase"><span class="spin"></span> Fetching chunks…</div>
+      <div class="bar"><i id="rBar"></i></div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $=function(s,r){return (r||document).querySelector(s)};
+  var svg=function(p){return '<svg viewBox="0 0 24 24">'+p+'</svg>'};
+  var IC={
+    folder:'<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>',
+    doc:'<path d="M7 3h7l4 4v14a1 1 0 01-1 1H7a1 1 0 01-1-1V4a1 1 0 011-1z"/><path d="M14 3v4h4"/>',
+    img:'<rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9" cy="9.5" r="1.6"/><path d="M5.5 18l4.5-5 3 3 2.5-2.5 3 4.5"/>',
+    chev:'<path d="M9 6l6 6-6 6"/>',
+    check:'<path d="M5 12l5 5L20 6"/>',
+    lock:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>'
+  };
+  function fmt(b){ if(b<1024)return b+' B'; var u=['KB','MB','GB','TB'],i=-1; do{b/=1024;i++}while(b>=1024&&i<3); return (b<10?b.toFixed(1):Math.round(b))+' '+u[i]; }
+  function ago(sec){ var d=[[31536000,'y'],[2592000,'mo'],[86400,'d'],[3600,'h'],[60,'m']]; for(var i=0;i<d.length;i++){var n=Math.floor(sec/d[i][0]); if(n>=1)return n+d[i][1]+' ago';} return 'just now'; }
+
+  // ---- fixtures (shapes mirror `pbmac list/archives/restore --list --json`) ----
+  var NOW=1783200000;
+  var SNAPS=[
+    {"backup-type":"host","backup-id":"mymac","backup-time":NOW-3600,"size":48910234,"enc":true,
+      tree:{Documents:{"report.pdf":420112,"budget.xlsx":88210,Drafts:{"q3-notes.md":12044,"pitch.key":9910233}},
+            Pictures:{"sunset.jpg":3401221,"team.png":1802113,Screenshots:{"Screenshot 1.png":880233,"Screenshot 2.png":902113}},
+            Projects:{pbmac:{"main.go":4211,"README.md":3325}}}},
+    {"backup-type":"host","backup-id":"mymac","backup-time":NOW-90000,"size":48120990,"enc":true,
+      tree:{Documents:{"report.pdf":410002,Drafts:{"q3-notes.md":11890}},Pictures:{"sunset.jpg":3401221}}},
+    {"backup-type":"host","backup-id":"mymac","backup-time":NOW-360000,"size":41200110,"enc":false,
+      tree:{Documents:{"report.pdf":390110},Projects:{pbmac:{"main.go":3990}}}}
+  ];
+
+  var st={snapIdx:0,path:[],checked:{}}; // checked keyed by full path
+
+  // ---------- snapshot list ----------
+  function renderSnaps(){
+    var el=$('#snapList'); el.innerHTML='<div class="list-head">host / mymac</div>';
+    SNAPS.forEach(function(s,i){
+      var d=document.createElement('div'); d.className='snap'+(i===st.snapIdx?' on':'');
+      d.innerHTML='<div class="snap-ico">'+svg(IC.folder)+'</div><div class="snap-meta">'+
+        '<div class="snap-id">'+s['backup-id']+(s.enc?'<span class="badge">'+svg(IC.lock).replace('viewBox','style="width:8px;height:8px;vertical-align:-1px;stroke:currentColor;fill:none" viewBox')+' ENCRYPTED</span>':'')+'</div>'+
+        '<div class="snap-when">'+ago(NOW-s['backup-time'])+'</div>'+
+        '<div class="snap-size">'+fmt(s.size)+' · '+s['backup-type']+'/'+s['backup-id']+'/'+s['backup-time']+'</div></div>';
+      d.onclick=function(){ st.snapIdx=i; st.path=[]; st.checked={}; renderSnaps(); renderBrowser(); syncAction(); };
+      el.appendChild(d);
+    });
+  }
+
+  // ---------- finder-style miller columns ----------
+  function nodeAt(pathArr){ var n=SNAPS[st.snapIdx].tree; for(var i=0;i<pathArr.length;i++){ n=n[pathArr[i]]; } return n; }
+  function isDir(v){ return v && typeof v==='object'; }
+
+  function renderBrowser(){
+    var cols=$('#columns'); cols.innerHTML='';
+    var cr=$('#crumbs');
+    // crumbs
+    var parts=['<b>'+SNAPS[st.snapIdx]['backup-id']+'</b>'];
+    st.path.forEach(function(p){ parts.push('<span class="chev">'+svg(IC.chev).replace('viewBox','style="width:11px;height:11px;stroke:currentColor;fill:none;vertical-align:-1px" viewBox')+'</span>'+p); });
+    cr.innerHTML=parts.join(' ');
+
+    // build columns: root + each opened dir
+    var chain=[[]]; // array of path-prefixes to render
+    for(var i=0;i<st.path.length;i++) chain.push(st.path.slice(0,i+1));
+    chain.forEach(function(prefix,ci){
+      var node=nodeAt(prefix); if(!isDir(node)) return;
+      var col=document.createElement('div'); col.className='col';
+      var keys=Object.keys(node).sort(function(a,b){ var da=isDir(node[a]),db=isDir(node[b]); if(da!==db)return da?-1:1; return a.localeCompare(b); });
+      keys.forEach(function(k){
+        var full=prefix.concat(k), v=node[k], dir=isDir(v);
+        var opened = st.path[ci]===k && st.path.length>ci;
+        var cell=document.createElement('div'); cell.className='cell'+(opened?' sel':'');
+        var fullKey=full.join('/');
+        var ic = dir?IC.folder:(/\.(png|jpg|jpeg|gif|heic|key)$/i.test(k)?IC.img:IC.doc);
+        var checkOn = !!st.checked[fullKey];
+        cell.innerHTML =
+          '<span class="check'+(checkOn?' on':'')+'">'+(checkOn?svg(IC.check):'')+'</span>'+
+          svg(ic)+'<span class="cname">'+k+'</span>'+
+          (dir?'<span class="csize">'+Object.keys(v).length+'</span>'+svg(IC.chev).replace('class="','').replace('<svg','<svg class="chev"'):'<span class="csize">'+fmt(v)+'</span>');
+        // click name/row -> navigate (for dir) or select (for file)
+        cell.onclick=function(e){
+          if(e.target.closest('.check')){ toggleCheck(fullKey,dir?countLeaves(v):v,k); return; }
+          if(dir){ st.path=full.slice(); renderBrowser(); }
+          else { toggleCheck(fullKey,v,k); }
+        };
+        col.appendChild(cell);
+      });
+      cols.appendChild(col);
+    });
+    if(st.path.length===0 && SNAPS[st.snapIdx]){ /* root shown */ }
+  }
+  function countLeaves(n){ var t=0; for(var k in n){ t += isDir(n[k])?countLeaves(n[k]):1; } return t; }
+
+  function toggleCheck(key,size,name){
+    if(st.checked[key]) delete st.checked[key]; else st.checked[key]={size:size,name:name};
+    renderBrowser(); syncAction();
+  }
+  function syncAction(){
+    var n=Object.keys(st.checked).length;
+    $('#selCount').innerHTML = n? '<b>'+n+'</b> item'+(n>1?'s':'')+' selected' : 'No files selected';
+    $('#restoreBtn').disabled = n===0;
+  }
+
+  // ---------- restore sheet ----------
+  var sheet=$('#sheet'), scrim=$('#scrim');
+  function openRestore(){
+    var items=Object.values(st.checked); if(!items.length)return;
+    $('#rCount').textContent=items.length+' item'+(items.length>1?'s':'');
+    var rl=$('#rList'); rl.innerHTML='';
+    items.forEach(function(it){ var d=document.createElement('div'); d.className='ritem';
+      d.innerHTML=svg(/\.(png|jpg|jpeg|key)$/i.test(it.name)?IC.img:IC.doc)+'<span>'+it.name+'</span><span class="rsz">'+(typeof it.size==='number'&&it.size<100000000?fmt(it.size):it.size+' files')+'</span>';
+      rl.appendChild(d); });
+    $('#rsetup').style.display=''; $('#rprog').classList.remove('on'); $('#rGo').disabled=false;
+    scrim.classList.add('on'); sheet.classList.add('on');
+  }
+  function closeRestore(){ scrim.classList.remove('on'); sheet.classList.remove('on'); }
+  function runRestore(){
+    $('#rprog').classList.add('on'); $('#rGo').disabled=true;
+    var phases=['Fetching chunks…','Decrypting…','Decoding pxar…','Writing files…'];
+    var p=0,bar=$('#rBar'); bar.style.width='0';
+    var t=setInterval(function(){
+      p+=8+Math.random()*10; if(p>100)p=100; bar.style.width=p+'%';
+      $('#rPhase').firstChild.nextSibling && ($('#rPhase').lastChild.textContent=' '+phases[Math.min(phases.length-1,Math.floor(p/26))]);
+      if(p>=100){ clearInterval(t);
+        $('#rPhase').innerHTML='<svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:var(--green);fill:none;stroke-width:2.2"><path d="M5 12l5 5L20 6"/></svg> Restored to ~/Restored';
+        setTimeout(function(){ closeRestore(); st.checked={}; renderBrowser(); syncAction(); },1100);
+      }
+    },230);
+  }
+
+  // ---------- nav / views ----------
+  $('#nav').addEventListener('click',function(e){
+    var a=e.target.closest('a'); if(!a)return;
+    [].forEach.call(this.querySelectorAll('a'),function(x){x.classList.remove('on')}); a.classList.add('on');
+    var v=a.dataset.view;
+    $('#v-snapshots').classList.toggle('on',v==='snapshots');
+    $('#v-backup').classList.toggle('on',v==='backup');
+    $('#tbTitle').innerHTML = v==='snapshots'? 'Snapshots <span class="sub">· cephfs-ssd-datastore</span>' : 'Back Up <span class="sub">· cephfs-ssd-datastore</span>';
+  });
+
+  // ---------- back up flow ----------
+  var opts={encrypt:true,compress:false}, srcSet=false;
+  function cmd(){ if(!srcSet)return'';
+    var f=['backup','--id '+($('#bid').value||'mymac')]; if(opts.encrypt)f.push('--encrypt'); if(opts.compress)f.push('--compress');
+    var ex=$('#excl').value.trim(); if(ex) ex.split(',').forEach(function(g){g=g.trim(); if(g)f.push('--exclude '+g)});
+    f.push('mymac.pxar:~/Documents'); return 'pbmac '+f.join(' '); }
+  function syncCmd(){ $('#cmdPreview').textContent=cmd(); }
+  [].forEach.call(document.querySelectorAll('.toggle'),function(t){ t.onclick=function(){ t.classList.toggle('on'); opts[t.dataset.opt]=t.classList.contains('on'); syncCmd(); }; });
+  $('#chooseBtn').onclick=function(){ srcSet=true; var p=$('#srcPath'); p.querySelector('span').className='set'; p.querySelector('span').textContent='~/Documents'; $('#runBackup').disabled=false; syncCmd(); };
+  $('#bid').oninput=syncCmd; $('#excl').oninput=syncCmd;
+  $('#runBackup').onclick=function(){
+    $('#backupForm').style.display='none'; $('#backupProgress').classList.add('on');
+    var p=0, up=0, re=0, by=0, total=48, reused=0;
+    var phases=['Encoding pxar archive…','Chunking & hashing…','Uploading chunks…','Reusing known chunks…','Finalizing manifest…'];
+    var bar=$('#bBar');
+    var t=setInterval(function(){
+      p+=3+Math.random()*5; if(p>100)p=100; bar.style.width=p+'%';
+      if(p<70){ up=Math.round(p/70*14); by=(up*3.4); } else { re=Math.round((p-70)/30*34); }
+      $('#sUp').innerHTML=up+' <small>chunks</small>'; $('#sRe').innerHTML=re+' <small>chunks</small>';
+      var de = (re+up)? Math.round(re/(re+up)*100):0; $('#sDe').innerHTML=de+'<small>%</small>';
+      $('#sBy').innerHTML=by.toFixed(1)+' <small>MB</small>';
+      $('#bPhase').lastChild.textContent=' '+phases[Math.min(phases.length-1,Math.floor(p/21))];
+      if(p>=100){ clearInterval(t);
+        $('#bPhase').innerHTML='<span class="done-badge"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 6"/></svg> Backed up — 14 new chunks, 34 reused (71% dedup)</span>';
+        // prepend new snapshot
+        SNAPS.unshift({"backup-type":"host","backup-id":$('#bid').value||'mymac',"backup-time":NOW+60,"size":48930000,"enc":opts.encrypt,
+          tree:SNAPS[0].tree});
+        setTimeout(function(){
+          $('#backupProgress').classList.remove('on'); $('#backupForm').style.display=''; bar.style.width='0';
+          $('#nav a[data-view="snapshots"]').click(); st.snapIdx=0; st.path=[]; st.checked={}; renderSnaps(); renderBrowser(); syncAction();
+        },1600);
+      }
+    },170);
+  };
+
+  $('#restoreBtn').onclick=openRestore;
+  $('#rCancel').onclick=closeRestore; scrim.onclick=closeRestore; $('#rGo').onclick=runRestore;
+  $('#refreshBtn').onclick=function(){ var b=this; b.style.opacity='.5'; setTimeout(function(){b.style.opacity=''},400); };
+
+  renderSnaps(); renderBrowser(); syncAction();
+})();
+</script>
+
+</body>
+</html>
