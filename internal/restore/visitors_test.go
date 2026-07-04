@@ -1,6 +1,32 @@
 package restore
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
+
+func TestExtractorSafeDest(t *testing.T) {
+	dest := filepath.Join(t.TempDir(), "target")
+	e := &Extractor{Dest: dest}
+
+	// In-target paths resolve under Dest.
+	for _, p := range []string{"/", "/a.txt", "/sub/b.txt"} {
+		got, err := e.safeDest(p)
+		if err != nil {
+			t.Errorf("safeDest(%q) errored: %v", p, err)
+			continue
+		}
+		if rel, _ := filepath.Rel(dest, got); rel == ".." || len(rel) >= 2 && rel[:2] == ".." {
+			t.Errorf("safeDest(%q) = %q escaped Dest", p, got)
+		}
+	}
+	// Traversal paths must be refused (defense in depth beyond the decoder).
+	for _, p := range []string{"/../../etc/x", "/../evil", "/a/../../b"} {
+		if _, err := e.safeDest(p); err == nil {
+			t.Errorf("safeDest(%q) = nil error, want rejection", p)
+		}
+	}
+}
 
 func TestExtractorWant(t *testing.T) {
 	cases := []struct {

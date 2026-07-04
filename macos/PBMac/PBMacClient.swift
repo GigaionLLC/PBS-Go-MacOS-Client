@@ -71,11 +71,17 @@ struct PBMacClient: Sendable {
                 process.executableURL = exe
                 process.arguments = args
 
+                // Set each PBS_* var when provided, else REMOVE it — so a field
+                // the user cleared falls back to pbmac's stored config instead of a
+                // value inherited from the launching shell.
                 var environment = ProcessInfo.processInfo.environment
-                if let v = env.repository { environment["PBS_REPOSITORY"] = v }
-                if let v = env.token { environment["PBS_API_TOKEN"] = v }
-                if let v = env.fingerprint { environment["PBS_FINGERPRINT"] = v }
-                if let v = env.encryptionPassword { environment["PBS_ENCRYPTION_PASSWORD"] = v }
+                func apply(_ key: String, _ value: String?) {
+                    if let value { environment[key] = value } else { environment.removeValue(forKey: key) }
+                }
+                apply("PBS_REPOSITORY", env.repository)
+                apply("PBS_API_TOKEN", env.token)
+                apply("PBS_FINGERPRINT", env.fingerprint)
+                apply("PBS_ENCRYPTION_PASSWORD", env.encryptionPassword)
                 process.environment = environment
 
                 let out = Pipe(), err = Pipe()

@@ -51,7 +51,6 @@ struct SnapshotToolbar: View {
     @Binding var showRestore: Bool
 
     var body: some View {
-        @Bindable var model = model
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(snapshot.backupID).font(.headline)
@@ -59,7 +58,13 @@ struct SnapshotToolbar: View {
             }
 
             if !model.archives.isEmpty {
-                Picker("Archive", selection: $model.selectedArchiveID) {
+                // Custom binding: only a user-driven Picker change calls selectArchive.
+                // Programmatic updates (selectSnapshot picking a default) flow through
+                // `get` without re-triggering a load, avoiding a double restore --list.
+                Picker("Archive", selection: Binding(
+                    get: { model.selectedArchiveID },
+                    set: { newID in Task { await model.selectArchive(newID) } }
+                )) {
                     ForEach(model.archives) { archive in
                         Label(archive.displayName,
                               systemImage: archive.isEncrypted ? "lock.fill" : "doc")
@@ -68,9 +73,6 @@ struct SnapshotToolbar: View {
                 }
                 .labelsHidden()
                 .frame(maxWidth: 260)
-                .onChange(of: model.selectedArchiveID) { _, id in
-                    Task { await model.selectArchive(id) }
-                }
             }
 
             Spacer(minLength: 8)

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"strings"
 )
 
 // Visitor receives entries as the decoder walks a pxar archive. For files, the
@@ -131,6 +132,9 @@ func (d *Decoder) walkDir(dirPath string, h itemHeader, v Visitor) error {
 			if err != nil {
 				return err
 			}
+			if err := validEntryName(name); err != nil {
+				return err
+			}
 			if err := d.decodeChild(dirPath+"/"+name, v); err != nil {
 				return err
 			}
@@ -233,6 +237,17 @@ func parseXattr(b []byte) (string, []byte) {
 		return string(b), nil
 	}
 	return string(b[:i]), append([]byte(nil), b[i+1:]...)
+}
+
+// validEntryName rejects directory-entry names that could escape the restore
+// target or corrupt the tree — mirroring the official pxar decoder. Applies to
+// path components (FILENAME), not symlink targets (which may legitimately
+// contain '/' and '..').
+func validEntryName(name string) error {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\x00") {
+		return fmt.Errorf("pxar: invalid archive entry name %q", name)
+	}
+	return nil
 }
 
 // readName reads a null-terminated name/target of the given content length.

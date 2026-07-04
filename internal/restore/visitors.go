@@ -1,6 +1,7 @@
 package restore
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -37,6 +38,18 @@ func (e *Extractor) dest(path string) string {
 	return filepath.Join(e.Dest, filepath.FromSlash(path))
 }
 
+// safeDest resolves the on-disk path for an archive path and errors if it would
+// escape Dest. Defense in depth — the decoder already rejects '..' components,
+// but a restore must never write outside its target.
+func (e *Extractor) safeDest(path string) (string, error) {
+	full := e.dest(path)
+	rel, err := filepath.Rel(e.Dest, full)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("restore: refusing to write %q outside the target directory", path)
+	}
+	return full, nil
+}
+
 func setTimes(p string, m pxar.Meta) {
 	t := time.Unix(m.MtimeSecs, int64(m.MtimeNanos))
 	_ = os.Chtimes(p, t, t)
@@ -47,7 +60,10 @@ func (e *Extractor) OnDir(path string, m pxar.Meta) error {
 	if !e.want(path) {
 		return nil
 	}
-	d := e.dest(path)
+	d, err := e.safeDest(path)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(d, perm(m.Mode)|0o700); err != nil {
 		return err
 	}
@@ -64,7 +80,10 @@ func (e *Extractor) OnFile(path string, m pxar.Meta, content io.Reader) error {
 	if !e.want(path) {
 		return nil // content is drained by the decoder
 	}
-	d := e.dest(path)
+	d, err := e.safeDest(path)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(d), 0o700); err != nil {
 		return err
 	}
@@ -94,7 +113,10 @@ func (e *Extractor) OnSymlink(path string, m pxar.Meta, target string) error {
 	if !e.want(path) {
 		return nil
 	}
-	d := e.dest(path)
+	d, err := e.safeDest(path)
+	if err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(d), 0o700); err != nil {
 		return err
 	}

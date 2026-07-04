@@ -36,9 +36,17 @@ enum DragOut {
 
     @MainActor
     private static func restoreToTemp(_ node: TreeNode, model: AppModel) async throws -> URL {
-        let dir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-            .appendingPathComponent("pbmac-drag-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fm = FileManager.default
+        let base = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        // Reclaim scratch dirs left by earlier drags (the system copies the item
+        // out, so our temp copy would otherwise linger until the OS purges it).
+        if let leftovers = try? fm.contentsOfDirectory(at: base, includingPropertiesForKeys: nil) {
+            for url in leftovers where url.lastPathComponent.hasPrefix("pbmac-drag-") {
+                try? fm.removeItem(at: url)
+            }
+        }
+        let dir = base.appendingPathComponent("pbmac-drag-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         _ = try await model.restore(to: dir, filePath: node.path)
 
         // pbmac reconstructs the archive path under --target; locate the item.

@@ -68,6 +68,19 @@ struct PBMacApp: App {
         let dest = URL(fileURLWithPath: "/usr/local/bin/pbmac")
         let fm = FileManager.default
         let alert = NSAlert()
+
+        // Guard: never delete/relink onto the destination itself, and never point
+        // at a source that doesn't exist. resolveExecutable() falls back to
+        // /usr/local/bin/pbmac when the bundled binary isn't found, which would
+        // otherwise make us destroy an existing CLI and leave a dangling link.
+        guard source.path != dest.path, fm.isExecutableFile(atPath: source.path) else {
+            alert.alertStyle = .warning
+            alert.messageText = "Couldn’t find the bundled pbmac"
+            alert.informativeText = "Reinstall the app, or point PBMAC_BIN at a pbmac binary."
+            alert.runModal()
+            return
+        }
+
         do {
             try? fm.createDirectory(atPath: "/usr/local/bin", withIntermediateDirectories: true)
             try? fm.removeItem(at: dest)

@@ -29,6 +29,7 @@ enum AppPane: Equatable { case browse, backup, setup, console }
 final class AppModel {
     private let client: PBMacClient
     private let defaults = UserDefaults.standard
+    private var browseToken = 0 // bumped per selection; stale async results are dropped
 
     // Settings. Non-secret fields persist via explicit calls (see persist* /
     // setKeyfile); token and passphrase are kept in memory only.
@@ -135,31 +136,46 @@ final class AppModel {
     }
 
     func selectSnapshot(_ id: Snapshot.ID?) async {
+        browseToken += 1
+        let token = browseToken
         selectedSnapshotID = id
         archives = []; selectedArchiveID = nil; tree = nil; focusedNode = nil
         guard let snap = selectedSnapshot else { return }
-        busy = true; defer { busy = false }
+        busy = true
         do {
-            archives = try await client.run(["archives", snap.spec], env: env, as: [Archive].self)
-            selectedArchiveID = archives.first(where: { $0.isBrowsable })?.id ?? archives.first?.id
-            await loadTree()
-        } catch { report(error) }
+            let loaded = try await client.run(["archives", snap.spec], env: env, as: [Archive].self)
+            guard token == browseToken else { return } // a newer selection superseded us
+            archives = loaded
+            selectedArchiveID = loaded.first(where: { $0.isBrowsable })?.id ?? loaded.first?.id
+            await loadTree(token: token)
+        } catch {
+            guard token == browseToken else { return }
+            report(error)
+        }
+        if token == browseToken { busy = false }
     }
 
     func selectArchive(_ id: Archive.ID?) async {
+        browseToken += 1
+        let token = browseToken
         selectedArchiveID = id
         tree = nil; focusedNode = nil
-        await loadTree()
+        await loadTree(token: token)
     }
 
-    private func loadTree() async {
+    private func loadTree(token: Int) async {
         guard let snap = selectedSnapshot, let archive = selectedArchive, archive.isBrowsable else { return }
-        busy = true; defer { busy = false }
+        busy = true
         do {
             let entries = try await client.run(
                 ["restore", "--list", snap.spec, archive.restoreName], env: env, as: [FileEntry].self)
+            guard token == browseToken else { return }
             tree = TreeNode.build(from: entries)
-        } catch { report(error) }
+        } catch {
+            guard token == browseToken else { return }
+            report(error)
+        }
+        if token == browseToken { busy = false }
     }
 
     // MARK: Restore / backup / key

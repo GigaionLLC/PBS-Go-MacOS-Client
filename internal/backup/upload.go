@@ -73,17 +73,29 @@ func Upload(ctx context.Context, c *protocol.Client, snap protocol.Snapshot, arc
 	// previous chunk's end), not its end. The server derives the size from the
 	// already-uploaded chunk and stores the end offset itself
 	// (src/api2/backup/environment.rs).
+	// Append in batches. PBS parses the whole PUT /dynamic_index JSON body in
+	// memory and rejects bodies over MAX_REQUEST_BODY_SIZE (512 KiB); at ~78
+	// bytes/entry a single append covering a large archive would blow past that,
+	// so — like the official client — we stream the index in bounded chunks.
+	// Offsets are absolute START offsets, so batches are independent and ordered.
 	entries := idx.Entries()
-	digests := make([][32]byte, len(entries))
-	offsets := make([]uint64, len(entries))
+	const appendBatch = 1024 // ~80 KiB/PUT, well under the 512 KiB server limit
 	var start uint64
-	for i, e := range entries {
-		digests[i] = e.Digest
-		offsets[i] = start
-		start = e.End
-	}
-	if err := w.AppendChunks(wid, digests, offsets); err != nil {
-		return res, fmt.Errorf("append chunks: %w", err)
+	for i := 0; i < len(entries); i += appendBatch {
+		end := i + appendBatch
+		if end > len(entries) {
+			end = len(entries)
+		}
+		digests := make([][32]byte, end-i)
+		offsets := make([]uint64, end-i)
+		for j := i; j < end; j++ {
+			digests[j-i] = entries[j].Digest
+			offsets[j-i] = start
+			start = entries[j].End
+		}
+		if err := w.AppendChunks(wid, digests, offsets); err != nil {
+			return res, fmt.Errorf("append chunks: %w", err)
+		}
 	}
 	if err := w.CloseDynamicIndex(wid, idx.ChunkCount(), idx.Size(), idx.Csum()); err != nil {
 		return res, fmt.Errorf("close index: %w", err)

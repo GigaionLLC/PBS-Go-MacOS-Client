@@ -97,6 +97,11 @@ func Parse(data []byte) (*Manifest, error) {
 	m.Signature = pm.Signature
 	for _, f := range pm.Files {
 		fi := FileInfo{Filename: f.Filename, Size: f.Size, CryptMode: f.CryptMode}
+		// hex.Decode writes one byte per pair with no bound check, so a csum
+		// longer than 64 hex chars would write past fi.Csum[32] and panic.
+		if len(f.Csum) > hex.EncodedLen(len(fi.Csum)) {
+			return nil, fmt.Errorf("bad csum for %s: %d hex chars (max %d)", f.Filename, len(f.Csum), hex.EncodedLen(len(fi.Csum)))
+		}
 		if _, err := hex.Decode(fi.Csum[:], []byte(f.Csum)); err != nil {
 			return nil, fmt.Errorf("bad csum for %s: %w", f.Filename, err)
 		}
