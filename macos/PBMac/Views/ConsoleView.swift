@@ -41,24 +41,7 @@ struct ConsoleView: View {
                         emptyState
                     }
                     ForEach(model.consoleLog) { entry in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 6) {
-                                Image(systemName: entry.ok ? "chevron.right" : "xmark.octagon.fill")
-                                    .font(.caption).foregroundStyle(entry.ok ? .secondary : .red)
-                                Text("pbmac \(entry.command)")
-                                    .font(.system(.callout, design: .monospaced))
-                                    .textSelection(.enabled)
-                            }
-                            if !entry.output.isEmpty {
-                                Text(entry.output)
-                                    .font(.system(.caption, design: .monospaced))
-                                    .foregroundStyle(entry.ok ? .secondary : .red)
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .id(entry.id)
+                        ConsoleRow(entry: entry).id(entry.id)
                     }
                 }
                 .padding(14)
@@ -75,11 +58,9 @@ struct ConsoleView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Type a pbmac command and press Return. Try:")
                 .foregroundStyle(.secondary)
-            ForEach(examples, id: \.self) { ex in
-                Button {
-                    input = ex
-                } label: {
-                    Text("pbmac \(ex)")
+            ForEach(examples, id: \.self) { example in
+                Button { input = example } label: {
+                    Text("pbmac \(example)")
                         .font(.system(.callout, design: .monospaced))
                         .foregroundStyle(.tint)
                 }
@@ -110,5 +91,29 @@ struct ConsoleView: View {
         guard !line.isEmpty else { return }
         input = ""
         Task { await model.runConsole(line) }
+    }
+}
+
+private struct ConsoleRow: View {
+    let entry: ConsoleEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: entry.ok ? "chevron.right" : "xmark.octagon.fill")
+                    .font(.caption)
+                    .foregroundStyle(entry.ok ? Color.secondary : Color.red)
+                Text("pbmac \(entry.command)")
+                    .font(.system(.callout, design: .monospaced))
+                    .textSelection(.enabled)
+            }
+            if !entry.output.isEmpty {
+                Text(entry.output)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(entry.ok ? Color.secondary : Color.red)
+                    .textSelection(.enabled)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

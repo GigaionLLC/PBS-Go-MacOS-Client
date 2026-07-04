@@ -18,7 +18,7 @@ struct CommandChip: View {
             Spacer(minLength: 6)
             Button(action: copy) {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .foregroundStyle(copied ? .green : .secondary)
+                    .foregroundStyle(copied ? Color.green : Color.secondary)
             }
             .buttonStyle(.borderless)
             .help("Copy command")
