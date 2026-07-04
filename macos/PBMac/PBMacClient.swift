@@ -28,7 +28,42 @@ struct PBMacClient: Sendable {
     }
 
     /// Runs pbmac and returns raw stdout bytes, throwing PBMacError on failure.
+    /// Result of running pbmac: both streams and the exit code, no interpretation.
+    struct Execution: Sendable {
+        let stdout: Data
+        let stderr: Data
+        let exitCode: Int32
+        var ok: Bool { exitCode == 0 }
+    }
+
+    /// Runs pbmac and returns raw stdout, mapping a non-zero exit's stderr
+    /// `{"error": …}` envelope (or plain text) to a PBMacError.
     func runRaw(_ args: [String], env: PBSEnv = PBSEnv()) async throws -> Data {
+        let r = try await execute(args, env: env)
+        if r.ok { return r.stdout }
+        if let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: r.stderr) {
+            throw PBMacError(message: envelope.error)
+        }
+        let text = String(data: r.stderr, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        throw PBMacError(message: text.isEmpty ? "pbmac exited with status \(r.exitCode)" : text)
+    }
+
+    /// Runs pbmac exactly as given (no --json added) and returns combined output
+    /// text + success — for the in-app console. Only a launch failure throws.
+    func runConsole(_ args: [String], env: PBSEnv = PBSEnv()) async throws -> (text: String, ok: Bool) {
+        let r = try await execute(args, env: env)
+        var text = String(data: r.stdout, encoding: .utf8) ?? ""
+        let errText = String(data: r.stderr, encoding: .utf8) ?? ""
+        if !errText.isEmpty {
+            if !text.isEmpty && !text.hasSuffix("\n") { text += "\n" }
+            text += errText
+        }
+        return (text.trimmingCharacters(in: .newlines), r.ok)
+    }
+
+    /// Launches pbmac, drains both pipes (before waiting, to avoid a pipe-buffer
+    /// deadlock), and returns both streams + the exit code.
+    private func execute(_ args: [String], env: PBSEnv) async throws -> Execution {
         let exe = executableURL
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -55,20 +90,10 @@ struct PBMacClient: Sendable {
                     return
                 }
 
-                // Drain before waiting so a large archive listing can't deadlock the pipe.
                 let outData = out.fileHandleForReading.readDataToEndOfFile()
                 let errData = err.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
-
-                if process.terminationStatus == 0 {
-                    continuation.resume(returning: outData)
-                } else if let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: errData) {
-                    continuation.resume(throwing: PBMacError(message: envelope.error))
-                } else {
-                    let text = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    continuation.resume(throwing: PBMacError(
-                        message: text.isEmpty ? "pbmac exited with status \(process.terminationStatus)" : text))
-                }
+                continuation.resume(returning: Execution(stdout: outData, stderr: errData, exitCode: process.terminationStatus))
             }
         }
     }

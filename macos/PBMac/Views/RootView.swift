@@ -6,7 +6,7 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     @State private var pane: Pane = .browse
 
-    enum Pane: Equatable { case browse, backup, setup }
+    enum Pane: Equatable { case browse, backup, setup, console }
 
     var body: some View {
         @Bindable var model = model
@@ -15,9 +15,10 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: 232, ideal: 258, max: 340)
         } detail: {
             switch pane {
-            case .browse: DetailView()
-            case .backup: BackupView(pane: $pane)
-            case .setup:  SetupView(pane: $pane)
+            case .browse:  DetailView()
+            case .backup:  BackupView(pane: $pane)
+            case .setup:   SetupView(pane: $pane)
+            case .console: ConsoleView()
             }
         }
         .alert("Something went wrong",
@@ -64,6 +65,8 @@ struct Sidebar: View {
             VStack(spacing: 2) {
                 SidebarButton(title: "Back Up a Folder…", systemImage: "arrow.up.circle.fill",
                               active: pane == .backup) { pane = .backup }
+                SidebarButton(title: "Console", systemImage: "terminal",
+                              active: pane == .console) { pane = .console }
                 SidebarButton(title: "Connection & Keys", systemImage: "key.fill",
                               active: pane == .setup) { pane = .setup }
             }

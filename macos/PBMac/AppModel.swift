@@ -9,6 +9,14 @@ enum ConnectionState: Equatable {
     var isConnected: Bool { if case .connected = self { return true } else { return false } }
 }
 
+// One run in the in-app pbmac console.
+struct ConsoleEntry: Identifiable {
+    let id = UUID()
+    let command: String   // the argv actually run, e.g. "list --json"
+    let output: String
+    let ok: Bool
+}
+
 // Single source of truth for the UI. Holds connection/credentials, the loaded
 // snapshot→archive→tree data, and the async commands that drive pbmac. Runs on
 // the main actor; the client does its process work off-main.
@@ -40,6 +48,9 @@ final class AppModel {
     // Status.
     var busy = false
     var lastError: String?
+
+    // In-app pbmac console.
+    var consoleLog: [ConsoleEntry] = []
 
     var selectedSnapshot: Snapshot? { snapshots.first { $0.id == selectedSnapshotID } }
     var selectedArchive: Archive? { archives.first { $0.id == selectedArchiveID } }
@@ -188,4 +199,31 @@ final class AppModel {
         let result = try await client.run(args, env: env, as: KeyResult.self)
         setKeyfile(result.path)
     }
+
+    // MARK: Console
+
+    /// Path of the pbmac binary the app runs (bundled copy, or a resolved one).
+    var pbmacExecutableURL: URL { client.executableURL }
+
+    /// Runs a pbmac command line typed in the console and records the result.
+    /// Data-changing commands also refresh the relevant GUI state.
+    func runConsole(_ line: String) async {
+        let args = CommandTokenizer.pbmacArgs(line)
+        guard !args.isEmpty else { return }
+        let shown = args.joined(separator: " ")
+        do {
+            let result = try await client.runConsole(args, env: env)
+            consoleLog.append(ConsoleEntry(command: shown, output: result.text, ok: result.ok))
+        } catch {
+            consoleLog.append(ConsoleEntry(command: shown,
+                                           output: (error as? PBMacError)?.message ?? error.localizedDescription,
+                                           ok: false))
+        }
+        switch args.first {
+        case "list", "snapshots", "backup": await loadSnapshots()
+        default: break
+        }
+    }
+
+    func clearConsole() { consoleLog.removeAll() }
 }

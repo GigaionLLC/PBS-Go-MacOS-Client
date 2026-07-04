@@ -18,6 +18,17 @@ struct RestoreSheet: View {
     private var focused: TreeNode? { model.focusedNode }
     private var restoreSingle: Bool { focused != nil && !wholeArchive }
 
+    private var restoreCommand: String {
+        guard let snap = model.selectedSnapshot, let archive = model.selectedArchive else { return "" }
+        var parts = ["pbmac restore"]
+        if restoreSingle, let focused { parts.append("--file \(focused.path)") }
+        parts.append("--target \(target?.path ?? "<destination>")")
+        if archive.isEncrypted && model.hasKey { parts.append("--keyfile <key>") }
+        parts.append(snap.spec)
+        parts.append(archive.restoreName)
+        return parts.joined(separator: " ")
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Restore").font(.title2.bold())
@@ -63,6 +74,8 @@ struct RestoreSheet: View {
                       systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundStyle(.orange)
             }
+
+            CommandChip(command: restoreCommand)
 
             HStack {
                 Spacer()

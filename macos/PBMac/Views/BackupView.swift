@@ -82,11 +82,10 @@ struct BackupView: View {
                 Button("Back Up", action: run)
                     .buttonStyle(.borderedProminent)
                     .disabled(source == nil || archiveName.isEmpty || (encrypt && !model.hasKey))
-                if let source {
-                    Text(commandPreview(source: source))
-                        .font(.caption.monospaced()).foregroundStyle(.tertiary)
-                        .lineLimit(1).truncationMode(.middle)
-                }
+                Spacer()
+            }
+            if let source {
+                CommandChip(command: commandPreview(source: source))
             }
         }
     }
