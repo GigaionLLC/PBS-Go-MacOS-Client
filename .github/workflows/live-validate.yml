@@ -112,9 +112,11 @@ jobs:
           printf 'xattr payload\n' > xa/f.txt
           xattr -w com.pbmac.test1 "hello-value-123" xa/f.txt          # string attr
           xattr -wx com.pbmac.bin "de ad be ef 00 11" xa/f.txt         # binary attr (incl. a NUL)
+          echo "--- source xattrs ---"; xattr -l xa/f.txt
           ./pbmac backup --id "$XID" test.pxar:xa
           BT=$(./pbmac list --json | python3 -c "import sys,json;print(max(s['backup-time'] for s in json.load(sys.stdin) if s['backup-id']=='$XID'))")
           ./pbmac restore --target xa-out "host/$XID/$BT" test.pxar
+          echo "--- restored xattrs ---"; xattr -l xa-out/f.txt || true
           diff xa/f.txt xa-out/f.txt
           test "$(xattr -p com.pbmac.test1 xa-out/f.txt)" = "hello-value-123"
           test "$(xattr -px com.pbmac.bin xa-out/f.txt | tr -d ' \n')" = "deadbeef0011"
@@ -168,7 +170,9 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pbs-client.list
           sudo apt-get update
           sudo apt-get install -y proxmox-backup-client
-          proxmox-backup-client version
+          # Don't run `... version` here: PBS_REPOSITORY is set at job level and
+          # that command would try to connect (and fail without PBS_PASSWORD).
+          command -v proxmox-backup-client
 
       - name: build pbmac and back up a tree
         run: |

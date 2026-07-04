@@ -53,12 +53,16 @@ func (f *LiveDirectoryFS) Stat(p string) (pxar.Meta, error) {
 	if err != nil {
 		return pxar.Meta{}, fmt.Errorf("stat %s: %w", p, err)
 	}
-	// Extended attributes (macOS com.apple.*; no-op off darwin).
-	xs, err := readXattrs(real)
-	if err != nil {
-		return pxar.Meta{}, fmt.Errorf("xattr %s: %w", p, err)
+	// Extended attributes (macOS com.apple.*; no-op off darwin). Skipped for
+	// symlinks: the darwin xattr wrappers follow the link, so reading a symlink's
+	// path would return the target's attributes — better to capture none.
+	if fi.Mode()&os.ModeSymlink == 0 {
+		xs, err := readXattrs(real)
+		if err != nil {
+			return pxar.Meta{}, fmt.Errorf("xattr %s: %w", p, err)
+		}
+		m.Xattrs = xs
 	}
-	m.Xattrs = xs
 	return m, nil
 }
 
