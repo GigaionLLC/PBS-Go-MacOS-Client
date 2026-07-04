@@ -77,6 +77,18 @@ snapshot.
 ```
 A Keychain-store failure is an `{"error": …}` (exit 1) under `--json`.
 
+### `key create [--keyfile PATH] [--kdf scrypt|none] [--hint H] [--force] --json`
+Generates a random AES-256 client-side encryption key and writes it as a PBS
+keyfile (readable by `--keyfile` here and by the official client). `--kdf scrypt`
+(default) wraps the key under `PBS_ENCRYPTION_PASSWORD`; `--kdf none` writes it
+unprotected. Refuses to overwrite an existing file without `--force`. Default
+path is `encryption-key.json` next to `config.json`.
+```json
+{ "path": "~/…/pbmac/encryption-key.json", "kdf": "scrypt", "encrypted": true }
+```
+`--kdf scrypt` without a passphrase, or an existing file without `--force`, is an
+`{"error": …}` (exit 1).
+
 ---
 
 ## Not yet in the contract (planned)

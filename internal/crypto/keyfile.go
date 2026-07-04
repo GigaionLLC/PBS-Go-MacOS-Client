@@ -4,12 +4,23 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/pbkdf2"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"time"
 
 	"golang.org/x/crypto/scrypt"
+)
+
+// scrypt cost parameters matching the PBS / official proxmox-backup-client
+// defaults, so keys created here interoperate with the reference client.
+const (
+	scryptN = 1 << 16
+	scryptR = 8
+	scryptP = 1
 )
 
 // KeyFile is the PBS on-disk encryption key format (pbs-key-config/src/lib.rs).
@@ -125,4 +136,62 @@ func LoadKeyFile(data []byte, passphrase []byte) (Key, error) {
 	}
 	copy(key[:], plain)
 	return key, nil
+}
+
+// keyFileOut is the on-disk serialization written by EncodeKeyFile. It is a
+// superset of the fields LoadKeyFile reads: `created`/`modified` (RFC3339 UTC)
+// and base64 `data` are included so the file also loads in the official
+// proxmox-backup-client, which requires those fields.
+type keyFileOut struct {
+	Kdf      *kdf   `json:"kdf"`
+	Created  string `json:"created"`
+	Modified string `json:"modified"`
+	Data     string `json:"data"`
+	Hint     string `json:"hint,omitempty"`
+}
+
+// EncodeKeyFile serializes key as a PBS keyfile. With a non-empty passphrase the
+// key is wrapped using scrypt + AES-256-GCM under the PBS default parameters
+// (data = iv[16] ‖ tag[16] ‖ ciphertext); with an empty passphrase it is stored
+// unencrypted (kdf=null). now stamps created/modified. The result round-trips
+// through LoadKeyFile with the same passphrase.
+func EncodeKeyFile(key Key, passphrase []byte, hint string, now time.Time) ([]byte, error) {
+	ts := now.UTC().Format(time.RFC3339)
+	out := keyFileOut{Created: ts, Modified: ts, Hint: hint}
+
+	if len(passphrase) == 0 {
+		out.Data = base64.StdEncoding.EncodeToString(key[:])
+		return json.MarshalIndent(out, "", "  ")
+	}
+
+	salt := make([]byte, 32)
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return nil, fmt.Errorf("generate salt: %w", err)
+	}
+	kek, err := scrypt.Key(passphrase, salt, scryptN, scryptR, scryptP, KeySize)
+	if err != nil {
+		return nil, fmt.Errorf("scrypt: %w", err)
+	}
+	block, err := aes.NewCipher(kek)
+	if err != nil {
+		return nil, err
+	}
+	aead, err := cipher.NewGCMWithNonceSize(block, 16)
+	if err != nil {
+		return nil, err
+	}
+	iv := make([]byte, 16)
+	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+		return nil, fmt.Errorf("generate iv: %w", err)
+	}
+	sealed := aead.Seal(nil, iv, key[:], nil) // ciphertext ‖ tag
+	ct, tag := sealed[:len(sealed)-16], sealed[len(sealed)-16:]
+	data := make([]byte, 0, len(iv)+len(tag)+len(ct))
+	data = append(data, iv...)
+	data = append(data, tag...)
+	data = append(data, ct...)
+
+	out.Data = base64.StdEncoding.EncodeToString(data)
+	out.Kdf = &kdf{Scrypt: &scryptParams{N: scryptN, R: scryptR, P: scryptP, Salt: base64.StdEncoding.EncodeToString(salt)}}
+	return json.MarshalIndent(out, "", "  ")
 }

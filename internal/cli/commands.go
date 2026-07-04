@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -416,6 +417,119 @@ func cmdLogin(args []string) int {
 		fmt.Printf("stored API token in the macOS Keychain for %q\n", *repoFlag)
 	} else {
 		fmt.Printf("note: provide --token to store the API token in the Keychain, or set %s.\n", config.EnvAPIToken)
+	}
+	return 0
+}
+
+// cmdKey dispatches the `key` command group. Today it has one subcommand,
+// `create`, which generates a client-side encryption key for encrypted backups.
+func cmdKey(args []string) int {
+	if len(args) == 0 {
+		return fail("key: expected a subcommand (create)")
+	}
+	switch args[0] {
+	case "create":
+		return cmdKeyCreate(args[1:])
+	default:
+		return fail("key: unknown subcommand %q (expected create)", args[0])
+	}
+}
+
+// defaultKeyfilePath returns the standard keyfile location, next to config.json.
+func defaultKeyfilePath() (string, error) {
+	p, err := config.Path()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(p), "encryption-key.json"), nil
+}
+
+// cmdKeyCreate generates a random AES-256 key and writes it as a PBS keyfile.
+// With --kdf scrypt (default) the key is wrapped under the passphrase in
+// PBS_ENCRYPTION_PASSWORD; --kdf none writes an unprotected key. Never
+// overwrites an existing file unless --force.
+func cmdKeyCreate(args []string) int {
+	fs := flag.NewFlagSet("key create", flag.ContinueOnError)
+	out := fs.String("keyfile", "", "output path (default: alongside config.json as encryption-key.json)")
+	kdfName := fs.String("kdf", "scrypt", "key protection: scrypt (passphrase-protected) or none")
+	hint := fs.String("hint", "", "non-secret hint stored in the keyfile (e.g. which passphrase)")
+	force := fs.Bool("force", false, "overwrite an existing keyfile")
+	outputJSON := fs.Bool("json", false, "emit JSON output")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	jsonMode = *outputJSON
+
+	path := *out
+	if path == "" {
+		p, err := defaultKeyfilePath()
+		if err != nil {
+			return fail("key create: %v", err)
+		}
+		path = p
+	}
+
+	var passphrase []byte
+	switch *kdfName {
+	case "scrypt":
+		passphrase = []byte(os.Getenv(envKeyPassword))
+		if len(passphrase) == 0 {
+			return fail("key create: --kdf scrypt needs a passphrase — set %s (or use --kdf none for an unprotected key)", envKeyPassword)
+		}
+	case "none":
+		// unprotected raw key
+	default:
+		return fail("key create: unknown --kdf %q (expected scrypt or none)", *kdfName)
+	}
+
+	if _, err := os.Stat(path); err == nil && !*force {
+		return fail("key create: %s already exists (use --force to overwrite)", path)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fail("key create: %v", err)
+	}
+
+	key, err := crypto.NewRandomKey()
+	if err != nil {
+		return fail("key create: %v", err)
+	}
+	blob, err := crypto.EncodeKeyFile(key, passphrase, *hint, time.Now())
+	if err != nil {
+		return fail("key create: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fail("key create: %v", err)
+	}
+	// O_EXCL closes the TOCTOU gap with the Stat check above unless --force.
+	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	if *force {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	}
+	f, err := os.OpenFile(path, flags, 0o600)
+	if err != nil {
+		return fail("key create: %v", err)
+	}
+	if _, err := f.Write(blob); err != nil {
+		_ = f.Close()
+		return fail("key create: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		return fail("key create: %v", err)
+	}
+
+	encrypted := *kdfName == "scrypt"
+	if *outputJSON {
+		return emitJSON(map[string]any{
+			"path":      path,
+			"kdf":       *kdfName,
+			"encrypted": encrypted,
+		})
+	}
+	if encrypted {
+		fmt.Printf("created passphrase-protected encryption key at %s\n", path)
+		fmt.Println("keep the passphrase safe — without it this key, and every backup made with it, is unrecoverable.")
+	} else {
+		fmt.Printf("created unprotected encryption key at %s\n", path)
+		fmt.Println("keep this file safe — without it, backups made with it cannot be restored.")
 	}
 	return 0
 }

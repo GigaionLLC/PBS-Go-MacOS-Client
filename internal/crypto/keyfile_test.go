@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/scrypt"
 )
@@ -64,6 +65,72 @@ func TestLoadScryptKeyFile(t *testing.T) {
 	}
 
 	// Wrong passphrase must fail authentication.
+	if _, err := LoadKeyFile(blob, []byte("wrong")); err == nil {
+		t.Fatal("expected failure with wrong passphrase")
+	}
+}
+
+func TestEncodeKeyFileUnencryptedRoundTrip(t *testing.T) {
+	var key Key
+	for i := range key {
+		key[i] = byte(0x11 * (i%15 + 1))
+	}
+	blob, err := EncodeKeyFile(key, nil, "", time.Unix(1_700_000_000, 0))
+	if err != nil {
+		t.Fatalf("EncodeKeyFile: %v", err)
+	}
+	if !LooksLikeKeyFile(blob) {
+		t.Fatal("encoded keyfile not detected as a keyfile")
+	}
+	// kdf must be explicitly null and created/modified present for interop.
+	var probe map[string]any
+	if err := json.Unmarshal(blob, &probe); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if probe["kdf"] != nil {
+		t.Errorf("kdf = %v, want null for unencrypted key", probe["kdf"])
+	}
+	if probe["created"] == "" || probe["modified"] == "" {
+		t.Error("created/modified missing")
+	}
+	got, err := LoadKeyFile(blob, nil)
+	if err != nil {
+		t.Fatalf("LoadKeyFile: %v", err)
+	}
+	if got != key {
+		t.Fatal("unencrypted round-trip mismatch")
+	}
+}
+
+func TestEncodeKeyFileScryptRoundTrip(t *testing.T) {
+	key, err := NewRandomKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pass := []byte("correct horse battery staple")
+	blob, err := EncodeKeyFile(key, pass, "my hint", time.Unix(1_700_000_000, 0))
+	if err != nil {
+		t.Fatalf("EncodeKeyFile: %v", err)
+	}
+
+	var kf KeyFile
+	if err := json.Unmarshal(blob, &kf); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if kf.Kdf == nil || kf.Kdf.Scrypt == nil {
+		t.Fatal("expected a Scrypt kdf")
+	}
+	if kf.Hint != "my hint" {
+		t.Errorf("hint = %q, want %q", kf.Hint, "my hint")
+	}
+
+	got, err := LoadKeyFile(blob, pass)
+	if err != nil {
+		t.Fatalf("LoadKeyFile: %v", err)
+	}
+	if got != key {
+		t.Fatal("scrypt round-trip mismatch")
+	}
 	if _, err := LoadKeyFile(blob, []byte("wrong")); err == nil {
 		t.Fatal("expected failure with wrong passphrase")
 	}

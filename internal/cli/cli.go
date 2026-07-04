@@ -58,6 +58,8 @@ func Run(args []string) int {
 		return cmdArchives(rest)
 	case "login":
 		return cmdLogin(rest)
+	case "key":
+		return cmdKey(rest)
 	default:
 		fmt.Fprintf(os.Stderr, "pbmac: unknown command %q\n\n", cmd)
 		usage(os.Stderr)
@@ -78,6 +80,7 @@ Commands:
   list      List snapshots in the datastore
   archives  List the archives/files in a snapshot (its manifest)
   login     Store repository + fingerprint in the local config
+  key       Create a client-side encryption key (key create)
   version   Print the client version
   help      Show this help
 
