@@ -5,7 +5,6 @@ import AppKit
 // key (choose an existing keyfile or generate one via `pbmac key create`).
 struct SetupView: View {
     @Environment(AppModel.self) private var model
-    @Binding var pane: RootView.Pane
     @State private var connecting = false
 
     var body: some View {
@@ -85,7 +84,7 @@ struct SetupView: View {
         Task {
             await model.saveAndConnect()
             connecting = false
-            if model.connection.isConnected { pane = .browse }
+            if model.connection.isConnected { model.pane = .browse }
         }
     }
 

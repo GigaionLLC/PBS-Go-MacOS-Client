@@ -7,7 +7,6 @@ import UniformTypeIdentifiers
 // run, and show the dedup result. On success the snapshot list refreshes.
 struct BackupView: View {
     @Environment(AppModel.self) private var model
-    @Binding var pane: RootView.Pane
 
     @State private var source: URL?
     @State private var archiveName = "root.pxar"
@@ -146,7 +145,7 @@ struct BackupView: View {
             }
             HStack {
                 Button("Back Up Another") { phase = .form; result = nil }
-                Button("View Snapshots") { pane = .browse }.buttonStyle(.borderedProminent)
+                Button("View Snapshots") { model.pane = .browse }.buttonStyle(.borderedProminent)
             }
             .padding(.top, 2)
         }

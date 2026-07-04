@@ -4,20 +4,16 @@ import SwiftUI
 // on the left, the active pane on the right.
 struct RootView: View {
     @Environment(AppModel.self) private var model
-    @State private var pane: Pane = .browse
-
-    enum Pane: Equatable { case browse, backup, setup, console }
 
     var body: some View {
-        @Bindable var model = model
         NavigationSplitView {
-            Sidebar(pane: $pane)
+            Sidebar()
                 .navigationSplitViewColumnWidth(min: 232, ideal: 258, max: 340)
         } detail: {
-            switch pane {
+            switch model.pane {
             case .browse:  DetailView()
-            case .backup:  BackupView(pane: $pane)
-            case .setup:   SetupView(pane: $pane)
+            case .backup:  BackupView()
+            case .setup:   SetupView()
             case .console: ConsoleView()
             }
         }
@@ -33,14 +29,13 @@ struct RootView: View {
 
 struct Sidebar: View {
     @Environment(AppModel.self) private var model
-    @Binding var pane: RootView.Pane
 
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
             ConnectionHeader()
                 .contentShape(Rectangle())
-                .onTapGesture { pane = .setup }
+                .onTapGesture { model.pane = .setup }
                 .padding(.horizontal, 10)
                 .padding(.top, 10)
 
@@ -57,18 +52,18 @@ struct Sidebar: View {
             }
             .listStyle(.sidebar)
             .onChange(of: model.selectedSnapshotID) { _, id in
-                pane = .browse
+                model.pane = .browse
                 Task { await model.selectSnapshot(id) }
             }
 
             Divider()
             VStack(spacing: 2) {
                 SidebarButton(title: "Back Up a Folder…", systemImage: "arrow.up.circle.fill",
-                              active: pane == .backup) { pane = .backup }
+                              active: model.pane == .backup) { model.pane = .backup }
                 SidebarButton(title: "Console", systemImage: "terminal",
-                              active: pane == .console) { pane = .console }
+                              active: model.pane == .console) { model.pane = .console }
                 SidebarButton(title: "Connection & Keys", systemImage: "key.fill",
-                              active: pane == .setup) { pane = .setup }
+                              active: model.pane == .setup) { model.pane = .setup }
             }
             .padding(8)
         }

@@ -77,6 +77,24 @@ Credentials/passphrase are passed to the CLI via environment
 (`PBS_REPOSITORY`, `PBS_API_TOKEN`, `PBS_FINGERPRINT`, `PBS_ENCRYPTION_PASSWORD`);
 `login` persists the non-secret parts and stores the token in the Keychain.
 
+## GUI ↔ CLI: one command surface
+
+The GUI never reimplements pbmac — it runs the bundled binary — so its command
+surface *is* the CLI's. Three ways that shows up:
+
+- **Console** (sidebar → Console, or ⌘K): type any `pbmac` command
+  (`list`, `backup --keyfile … root.pxar:/data`, `key create …`); it runs against
+  the bundled binary, shows combined output, and refreshes the sidebar for
+  data-changing commands. A leading `pbmac` is optional.
+- **Copy the command**: every backup/restore shows its exact `pbmac …` command
+  with one-click copy, so a GUI action can be reproduced in a terminal.
+- **`pbmac://` deep links** drive the GUI from a script/terminal (`open "…"`):
+  `pbmac://snapshots`, `pbmac://snapshot/host/mymac/1700000000`,
+  `pbmac://backup`, `pbmac://setup`, `pbmac://console?cmd=list`.
+- **Install Command-Line Tool** (app menu): symlinks the bundled `pbmac` onto
+  your `PATH`, so Terminal runs the *identical* binary the GUI uses (falls back
+  to printing the `ln -s` command if it needs admin rights).
+
 ## Verify on device
 
 Some AppKit paths can only be exercised on macOS — sanity-check on first build:

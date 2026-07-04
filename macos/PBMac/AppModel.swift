@@ -17,6 +17,10 @@ struct ConsoleEntry: Identifiable {
     let ok: Bool
 }
 
+// Which detail pane is showing. Held in AppModel so `pbmac://` deep links can
+// drive navigation from outside the view hierarchy.
+enum AppPane: Equatable { case browse, backup, setup, console }
+
 // Single source of truth for the UI. Holds connection/credentials, the loaded
 // snapshot→archive→tree data, and the async commands that drive pbmac. Runs on
 // the main actor; the client does its process work off-main.
@@ -34,7 +38,8 @@ final class AppModel {
     var token: String = ""          // in-memory; prefer `pbmac login` (Keychain)
     var passphrase: String = ""     // in-memory; passed as PBS_ENCRYPTION_PASSWORD
 
-    // Connection.
+    // Navigation + connection.
+    var pane: AppPane = .browse
     var connection: ConnectionState = .unknown
 
     // Data.
