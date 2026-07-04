@@ -15,7 +15,8 @@ is.
   single file — without mounting anything (no macFUSE).
 - Client-side **AES-256-GCM** encryption, wire-compatible with PBS so backups
   restore with official tooling too.
-- Machine-readable (`--output json`) output so a future GUI can drive the CLI.
+- Machine-readable (`--json`) output so a GUI can drive the CLI (see §6 and
+  [`CLI-JSON.md`](CLI-JSON.md)).
 
 **Non-goals (for now):**
 - Intel (`amd64`) macOS — arm64 only for v1.
@@ -143,10 +144,20 @@ also what the GUI drives: `restore --list` to browse, `restore --file` to pull.
 ## 6. GUI ↔ CLI contract
 
 The GUI is a separate component. It never speaks the PBS protocol itself; it
-shells out to `pbmac` and parses `--output json`. Every subcommand that returns
-data (snapshot lists, archive listings, progress) must have a stable JSON shape.
-This keeps the trust boundary and the protocol code in one place (the CLI) and
-lets the GUI be any tech (SwiftUI, Tauri, Electron).
+shells out to `pbmac` and parses `--json`. The stable per-command JSON shapes
+(and the `{"error": …}` envelope) are frozen in [`CLI-JSON.md`](CLI-JSON.md), so
+the GUI can be built and iterated against fixtures on any OS. This keeps the trust
+boundary and the protocol code in one place (the CLI).
+
+**Recommended stack: Tauri.** The GUI's whole job is "spawn a CLI, stream JSON,
+render lists/trees/forms," so native-API depth matters little. Tauri's *sidecar*
+mechanism is the cleanest way to bundle+exec `pbmac` (incl. signing/notarization),
+it feels closer to native than Electron (system WebView), and Windows devs can
+build the whole UI against `CLI-JSON.md` fixtures + a stub `pbmac`, with only a
+thin Rust glue file validated on mac CI. (Electron is the fallback if the team
+wants zero Rust; SwiftUI is the wrong fit for a partly-Windows Go team.) Screens:
+repository/login, snapshot browser (`list`), archive picker (`archives`), file
+restore picker (`restore --list`), restore run, backup config+run.
 
 ## 7. macOS & APFS considerations
 
@@ -155,9 +166,13 @@ lets the GUI be any tech (SwiftUI, Tauri, Electron).
   backup.
 - The low-level `fs_snapshot_create()` syscall needs the
   `com.apple.developer.vfs.snapshot` entitlement, granted by Apple only to
-  vetted backup vendors after review — **not** available to us today. So the
-  `SnapshotSource` (v2) shells out to `tmutil localsnapshot` +
-  `mount_apfs -s` (Apple's own entitled binaries) instead.
+  vetted backup vendors — not available to us. So the **`SnapshotSource`
+  (implemented, `backup --snapshot`)** shells out to Apple's entitled binaries:
+  `tmutil localsnapshot` → `mount_apfs -o nobrowse,ro -s` → back up the subtree
+  from the read-only snapshot mount → `tmutil deletelocalsnapshots` on close
+  (`internal/source/snapshot*.go`). Needs `sudo` and — since CVE-2020-9771 — the
+  reading process still needs Full Disk Access (a snapshot is not a TCC bypass).
+  The create/mount/cleanup orchestration is unit-tested via an injected runner.
 - **TCC / Full Disk Access:** reading broad user data (Desktop, Documents,
   Photos library) triggers macOS privacy prompts; the app needs Full Disk
   Access for wide backups. Document this in user setup.
@@ -175,9 +190,15 @@ lets the GUI be any tech (SwiftUI, Tauri, Electron).
   official Linux client honors immutable/append on restore. System-managed macOS
   flags (SIP/dataless/firmlink/compressed) have no equivalent and are dropped;
   symlinks are skipped (no `lchflags` on darwin).
-- **Remaining metadata gap: POSIX ACLs** — pxar has dedicated `PXAR_ACL_*` item
-  types the official Linux client emits; we don't yet. That's the one legitimate
-  fidelity item still open.
+- **ACLs — implemented (macOS-native).** macOS uses NFSv4-style ACLs, which
+  cannot be honestly represented in pxar's POSIX.1e `PXAR_ACL_*` items (no deny
+  ACEs, no GUIDs, rwx-only), and reading a POSIX ACL would need cgo. Instead we
+  carry the native ACL verbatim: macOS exposes it as the `com.apple.system.Security`
+  pseudo-xattr (how `copyfile(COPYFILE_ACL)` works), so it rides the existing
+  xattr channel cgo-free. It's filtered out of `listxattr`, so we fetch it by
+  explicit name (`internal/source/xattr_darwin.go`); restore is the normal
+  `setxattr`. Lossless macOS↔macOS; opaque to and ignored by the Linux client.
+  (`PXAR_ACL_*` interop is deferred as lossy/unsound — see the rejected mapping.)
 
 ## 8. Roadmap
 
@@ -190,7 +211,7 @@ lets the GUI be any tech (SwiftUI, Tauri, Electron).
 | M4 (done, code) | Restore in `pbmac`: reader protocol, index parse, chunk reassembly, **pxar decoder**, list + whole-archive + single-file. pxar encoder↔decoder proven consistent by a round-trip test | validate |
 | M3 (done, code) | Encrypted dedup: `CryptConfig` keyed digest ✓, scrypt/PBKDF2 keyfile ✓, manifest HMAC signature ✓ (gold-vector matched) | validate |
 | M5 (done) | Keychain credential storage ✓, `.pxarexclude`/`--exclude` ✓, `--json` on data commands ✓ | no |
-| M6 (v2) | `SnapshotSource` via tmutil; GUI front-end | mixed |
+| M6 (v2) | `SnapshotSource` via tmutil ✓ (`backup --snapshot`); macOS metadata fidelity ✓ (xattrs, ACLs, file flags); GUI front-end: CLI JSON contract frozen (`CLI-JSON.md`), Tauri app pending | mixed |
 
 **Formats status:** all wire/on-disk formats are ported byte-for-byte from the
 Proxmox source and unit-tested offline. The two things unit tests *cannot* prove

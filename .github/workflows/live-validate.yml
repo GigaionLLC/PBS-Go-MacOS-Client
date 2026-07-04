@@ -261,3 +261,51 @@ jobs:
                   "$base?backup-type=host&backup-id=$IID&backup-time=$t"
               done
           echo "pruned interop snapshot"
+
+  apfs-snapshot:
+    name: APFS snapshot backup (best-effort)
+    runs-on: macos-14
+    continue-on-error: true # runner Time-Machine/TCC state is uncertain — informational
+    env:
+      PBS_REPOSITORY: ${{ secrets.PBS_REPOSITORY }}
+      PBS_API_TOKEN: ${{ secrets.PBS_API_TOKEN }}
+      PBS_FINGERPRINT: ${{ secrets.PBS_FINGERPRINT }}
+      SID: ci-apfs-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: probe -> snapshot backup -> restore -> verify
+        run: |
+          set -euo pipefail
+          if ! sudo tmutil localsnapshot 2>/dev/null | grep -q "Created local snapshot"; then
+            echo "::warning::runner cannot create APFS local snapshots; skipping the live test"
+            exit 0
+          fi
+          go build -trimpath -o pbmac ./cmd/pbmac
+          mkdir -p tree/sub
+          printf 'apfs snapshot backup %s\n' "$SID" > tree/a.txt
+          printf 'nested\n' > tree/sub/b.txt
+          ./pbmac backup --snapshot --id "$SID" "test.pxar:$PWD/tree"
+          BT=$(./pbmac list --json | python3 -c "import sys,json;print(max(s['backup-time'] for s in json.load(sys.stdin) if s['backup-id']=='$SID'))")
+          ./pbmac restore --target out "host/$SID/$BT" test.pxar
+          diff -r tree out
+          echo "APFS snapshot backup->restore byte-perfect"
+
+      - name: prune
+        if: always()
+        run: |
+          IFS=: read -r H P S <<< "$PBS_REPOSITORY"
+          if [ -z "$S" ]; then S="$P"; P=8007; fi
+          base="https://$H:$P/api2/json/admin/datastore/$S/snapshots"
+          curl -k -sS -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" "$base?backup-type=host&backup-id=$SID" \
+            | python3 -c "import json,sys; [print(s['backup-time']) for s in json.load(sys.stdin).get('data',[])]" \
+            | while read -r t; do
+                curl -k -sS -o /dev/null -X DELETE -H "Authorization: PBSAPIToken=$PBS_API_TOKEN" \
+                  "$base?backup-type=host&backup-id=$SID&backup-time=$t"
+              done
+          sudo tmutil deletelocalsnapshots / 2>/dev/null || true
+          echo "pruned apfs test snapshots"
