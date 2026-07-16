@@ -14,6 +14,12 @@ and a **native SwiftUI app** that bundles the CLI inside it.
 > for exactly what's done / validated / deferred, and
 > [`docs/DESIGN.md`](docs/DESIGN.md) for architecture + protocol notes.
 
+pbmac deliberately installs **no macFUSE/FUSE runtime or kernel extension**.
+The current recovery experience is the app's Finder-style browser plus explicit
+restore/drag-out. A possible future read-only Apple File Provider integration
+(Finder placeholders with download-on-access) is documented, but deferred, in
+[`docs/DESIGN.md` §6.1](docs/DESIGN.md#61-finder-integration-and-on-demand-access-deferred).
+
 ## Install (the app)
 
 Grab the latest [**release**](https://github.com/GigaionLLC/PBS-Go-MacOS-Client/releases):

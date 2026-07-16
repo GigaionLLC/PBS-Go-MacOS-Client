@@ -114,10 +114,12 @@ server's and unchanged regions re-sync after edits.
 3. Reconstruct the `pxar` byte stream from the index + chunks, decrypt if
    needed, then extract.
 
-**macOS restore strategy:** catalog-driven. Download the `.pxar` catalog to
-*list* contents cheaply; for a single-file restore, resolve only the chunks
-covering that file's byte range and fetch just those. No NBD, no FUSE. This is
-also what the GUI drives: `restore --list` to browse, `restore --file` to pull.
+**Target macOS restore strategy (not yet implemented):** catalog-driven. Download
+the archive catalog to *list* contents cheaply; for a single-file restore,
+resolve only the chunks covering that file's byte range and fetch just those.
+No NBD, no FUSE. In v0.1.0, both `restore --list` and `restore --file` still
+reconstruct and scan the complete pxar stream; catalog support and random access
+are follow-up work (see §6.1).
 
 ## 5. Encryption (must match PBS to stay wire-compatible)
 
@@ -164,6 +166,61 @@ equivalent command with copy, `pbmac://` deep links drive it from a script, and 
 Connection & Keys (`login` + `key create`), snapshot browser (`list`), archive
 picker (`archives`), file restore picker (`restore --list`), restore run, backup
 config+run. The design prototype (reviewable on any OS) lives in `gui/`.
+
+### 6.1 Finder integration and on-demand access (deferred)
+
+The project will **not use FUSE or macFUSE**. macFUSE is a third-party runtime
+with additional installation, update, compatibility, and security behavior; in
+some configurations it also involves kernel-extension approval or reduced
+startup security. Requiring it would conflict with pbmac's one-download,
+cgo-free, low-friction macOS design. The official client's read-only FUSE mount
+is therefore an intentional platform exception rather than a literal parity
+requirement.
+
+Potential macOS approaches are recorded here so the decision does not need to be
+re-derived later:
+
+| Option | User experience | Decision |
+|---|---|---|
+| Existing SwiftUI browser + explicit restore/drag-out | Browse and recover inside the app; no OS integration | Current supported path |
+| Catalog-backed SwiftUI browser | Fast in-app navigation without downloading the pxar payload | Preferred next foundation |
+| Apple File Provider (`NSFileProviderReplicatedExtension`) | Read-only Finder location, metadata-only placeholders, download on open/copy, OS-managed cache and eviction | Best native future option; deferred |
+| FSKit or a loopback network filesystem | A more literal mounted-filesystem surface | Not planned; substantially more filesystem and deployment complexity than the backup workflow needs |
+| macFUSE/FUSE | Traditional read-only mount | Rejected; no third-party filesystem runtime |
+
+If File Provider work is approved later, it should be a **read-only backup
+browser**, not a writable sync drive. A domain would expose a repository tree
+(datastore → namespace → group → snapshot → archive → files). Items would allow
+reading, directory enumeration, copying, and cache eviction, while creation,
+modification, rename, move, and delete remain disabled because PBS snapshots are
+immutable backup records. The Swift extension must stay thin and call the Go
+backend rather than reimplementing the PBS protocol.
+
+Prerequisites and constraints:
+
+- Generate and read the PBS catalog (`catalog.pcat1`, stored as a dynamic index)
+  so Finder can enumerate names and metadata without downloading the archive.
+  Current pbmac backups do not create a catalog, and current `restore --list`
+  scans the complete pxar stream.
+- Add a seekable dynamic-index/pxar reader that maps a selected file (and later a
+  byte range) to only the required chunks. Current `restore --file` also scans
+  the complete stream.
+- Verify the manifest, index, chunk digests, signatures, and decryption before
+  returning materialized content. Use a bounded local chunk/file cache.
+- Define a safe app-extension/helper boundary for PBS connections, Keychain
+  credentials, and encrypted-snapshot unlocking. File Provider callbacks should
+  not spawn a fresh CLI process for every small operation.
+- File Provider is an app extension, not a kernel extension, but it introduces
+  sandbox, entitlement, activation, signing, and packaging work. The current
+  ad-hoc-signed, unsandboxed app must not be silently displaced by that change.
+- This would provide native Finder browse/open/copy behavior, not full POSIX
+  mount semantics. macOS or the opening application may materialize an entire
+  file even when partial-content fetching is implemented. Faithful bulk restore,
+  including backup metadata semantics, remains the CLI/GUI Restore operation.
+
+There is no File Provider implementation or CI/release requirement in the
+current scope. Reconsider it only after catalog-backed browsing and efficient,
+integrity-checked selective restore are complete.
 
 ## 7. macOS & APFS considerations
 

@@ -5,7 +5,7 @@ left — so anyone (or a fresh session) can pick up without re-deriving context.
 Deeper detail lives in [`DESIGN.md`](DESIGN.md) (architecture/protocol) and
 [`CLI-JSON.md`](CLI-JSON.md) (the GUI↔CLI contract).
 
-_Last updated: v0.1.0 release._
+_Last updated: 2026-07-15 (post-v0.1.0 design review)._
 
 ## What this is
 
@@ -51,6 +51,10 @@ Install-Command-Line-Tool action.
 - **Ad-hoc signed, not notarized.** Runs on Apple Silicon with right-click→Open;
   no Apple Developer account required. No App Sandbox / hardened runtime, so the
   app can exec the bundled CLI and reach the network without special entitlements.
+- **No FUSE or macFUSE dependency.** pbmac will not require a third-party
+  filesystem runtime, kernel extension, Recovery-mode security changes, or a
+  separate filesystem installation. The official client's FUSE `mount` command
+  is an intentional macOS platform exception, not a parity target for v1.
 - **Credentials never in git.** Repo + fingerprint → `pbmac login` config
   (`~/Library/Application Support/pbmac/config.json`); API token → macOS Keychain;
   or `PBS_*` env / a gitignored `.env` (see `.env.example`). Test-server creds are
@@ -61,6 +65,12 @@ Install-Command-Line-Tool action.
 - **NFSv4 ACLs** — can't be honestly represented in pxar's POSIX.1e ACL items and
   the real API needs cgo (conflicts with the cgo-free invariant). The metadata
   users rely on rides along as `com.apple.*` xattrs anyway. See DESIGN §7.
+- **Finder-integrated, on-demand access** — not planned for the current release.
+  The preferred native option, if pursued later, is a read-only Apple File
+  Provider extension with metadata-only placeholders and per-file materialization.
+  It would build on catalog-backed browsing and true random-access restore; it
+  would not be a POSIX mount. Alternatives and prerequisites are recorded in
+  DESIGN §6.1.
 - **Intel (amd64) macOS**, whole-volume/bare-metal restore, a scheduler/daemon
   (leave to `launchd`), and PBS **namespaces** (`Client.Namespace` exists in the
   protocol layer but no CLI flag wires it yet).
